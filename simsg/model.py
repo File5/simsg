@@ -615,3 +615,371 @@ def combine_boxes(gt, pred):
     new_box[3] = min(1.0, c_y + h / 2) # bottom
 
     return new_box
+
+
+from dgl.nn.pytorch import GATConv
+
+from torchtext.vocab import GloVe
+glove = GloVe("6B", dim=50)
+
+
+class GATModel(nn.Module):
+    """
+    SIMSG network. Given a source image and a scene graph, the model generates
+    a manipulated image that satisfies the scene graph constellations
+    """
+    def __init__(self, vocab, image_size=(64, 64), embedding_dim=64,
+                 gconv_dim=128, gconv_hidden_dim=512,
+                 gconv_pooling='avg', gconv_num_layers=5,
+                 decoder_dims=(1024, 512, 256, 128, 64),
+                 normalization='batch', activation='leakyrelu-0.2',
+                 mask_size=None, mlp_normalization='none', layout_noise_dim=0,
+                 img_feats_branch=True, feat_dims=128, is_baseline=False, is_supervised=False,
+                 feats_in_gcn=False, feats_out_gcn=True, layout_pooling="sum",
+                 spade_blocks=False, **kwargs):
+
+        super(SIMSGModel, self).__init__()
+
+        if len(kwargs) > 0:
+            print('WARNING: Model got unexpected kwargs ', kwargs)
+
+        self.vocab = vocab
+        self.image_size = image_size
+        self.layout_noise_dim = layout_noise_dim
+
+        self.feats_in_gcn = feats_in_gcn
+        self.feats_out_gcn = feats_out_gcn
+        self.spade_blocks = spade_blocks
+        self.is_baseline = is_baseline
+        self.is_supervised = is_supervised
+
+        self.image_feats_branch = img_feats_branch
+
+        self.layout_pooling = layout_pooling
+
+        num_objs = len(vocab['object_idx_to_name'])
+        num_preds = len(vocab['pred_idx_to_name'])
+        self.obj_embeddings = nn.Embedding(num_objs + 1, embedding_dim)
+        self.pred_embeddings = nn.Embedding(num_preds, embedding_dim)
+
+        if self.is_baseline or self.is_supervised:
+            gconv_input_dims = embedding_dim
+        else:
+            if self.feats_in_gcn:
+                gconv_input_dims = embedding_dim + 4 + feat_dims
+            else:
+                gconv_input_dims = embedding_dim + 4
+        gat_input_dims = gconv_input_dims
+        gat_dim = gconv_dim
+
+        gat_num_heads = 4
+        #self.gat = GATConv(graph_features_dim, gat_out_dim, gat_num_heads)
+        self.gat = GATConv(gat_input_dims, gat_dim, gat_num_heads)
+
+        if not (self.is_baseline or self.is_supervised):
+            self.high_level_feats = self.build_obj_feats_net()
+            # freeze vgg
+            for param in self.high_level_feats.parameters():
+                param.requires_grad = False
+
+            self.high_level_feats_fc = self.build_obj_feats_fc(feat_dims)
+
+            if self.feats_in_gcn:
+                self.layer_norm = nn.LayerNorm(normalized_shape=embedding_dim + 4 + feat_dims)
+                if self.feats_out_gcn:
+                    self.layer_norm2 = nn.LayerNorm(normalized_shape=gconv_dim + feat_dims)
+            else:
+                self.layer_norm = nn.LayerNorm(normalized_shape=embedding_dim + 4)
+                self.layer_norm2 = nn.LayerNorm(normalized_shape=gconv_dim + feat_dims)
+
+        self.p = 0.25
+        self.p_box = 0.35
+
+    def build_obj_feats_net(self):
+        # get VGG16 features for each object RoI
+        vgg_net = T.models.vgg16(pretrained=True)
+        layers = list(vgg_net.features._modules.values())[:-1]
+
+        img_feats = nn.Sequential(*layers)
+
+        return img_feats
+
+    def build_obj_feats_fc(self, feat_dims):
+        # fc layer following the VGG16 backbone
+        return nn.Linear(512 * int(self.image_size[0] / 64) * int(self.image_size[1] / 64), feat_dims)
+
+    def _build_mask_net(self, dim, mask_size):
+        # mask prediction network
+        output_dim = 1
+        layers, cur_size = [], 1
+        while cur_size < mask_size:
+            layers.append(nn.Upsample(scale_factor=2, mode='nearest'))
+            layers.append(nn.BatchNorm2d(dim))
+            layers.append(nn.Conv2d(dim, dim, kernel_size=3, padding=1))
+            layers.append(nn.ReLU())
+            cur_size *= 2
+        if cur_size != mask_size:
+            raise ValueError('Mask size must be a power of 2')
+        layers.append(nn.Conv2d(dim, output_dim, kernel_size=1))
+        return nn.Sequential(*layers)
+
+    def forward(self, objs, triples, obj_to_img=None, boxes_gt=None, masks_gt=None, src_image=None, imgs_src=None,
+                keep_box_idx=None, keep_feat_idx=None, keep_image_idx=None, combine_gt_pred_box_idx=None,
+                query_feats=None, mode='train', t=0, query_idx=0, random_feats=False, get_layout_boxes=False):
+        """
+        Required Inputs:
+        - objs: LongTensor of shape (num_objs,) giving categories for all objects
+        - triples: LongTensor of shape (num_triples, 3) where triples[t] = [s, p, o]
+          means that there is a triple (objs[s], p, objs[o])
+
+        Optional Inputs:
+        - obj_to_img: LongTensor of shape (num_objs,) where obj_to_img[o] = i
+          means that objects[o] is an object in image i. If not given then
+          all objects are assumed to belong to the same image.
+        - boxes_gt: FloatTensor of shape (num_objs, 4) giving boxes to use for computing
+          the spatial layout; if not given then use predicted boxes.
+        - src_image: (num_images, 3, H, W) input image to be modified
+        - query_feats: feature vector from another image, to be used optionally in object replacement
+        - keep_box_idx, keep_feat_idx, keep_image_idx: Tensors of ones or zeros, indicating
+        what needs to be kept/masked on evaluation time.
+        - combine_gt_pred_box_idx: Tensor of ones and zeros, indicating if size of pred box and position of gt boxes
+          should be combined. Used in the "replace" mode.
+        - mode: string, can take the option 'train' or one of the evaluation modes
+        - t: iteration index, intended for debugging
+        - query_idx: scalar id of object where query_feats should be used
+        - random_feats: boolean. Used during evaluation to use noise instead of zeros for masked features phi
+        - get_layout_boxes: boolean. If true, the boxes used for final layout construction are returned
+        """
+
+        assert mode in ["train", "eval", "auto_withfeats", "auto_nofeats", "reposition", "remove", "replace", "addition"]
+
+        evaluating = mode != 'train'
+
+        in_image = src_image.clone()
+        num_objs = objs.size(0)
+        s, p, o = triples.chunk(3, dim=1)  # All have shape (num_triples, 1)
+        s, p, o = [x.squeeze(1) for x in [s, p, o]]  # Now have shape (num_triples,)
+        edges = torch.stack([s, o], dim=1)  # Shape is (num_triples, 2)
+
+        obj_vecs = self.obj_embeddings(objs)
+
+        if obj_to_img is None:
+            obj_to_img = torch.zeros(num_objs, dtype=objs.dtype, device=objs.device)
+
+        if combine_gt_pred_box_idx is None:
+            combine_gt_pred_box_idx = torch.zeros_like(objs)
+
+        if not (self.is_baseline or self.is_supervised):
+
+            box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
+            box_keep, feats_keep = self.prepare_keep_idx(evaluating, box_ones, in_image.size(0), obj_to_img,
+                                                         keep_box_idx, keep_feat_idx)
+
+            boxes_prior = boxes_gt * box_keep
+
+            obj_crop = get_cropped_objs(in_image, boxes_gt, obj_to_img, feats_keep, box_keep, evaluating, mode)
+
+            high_feats = self.high_level_feats(obj_crop)
+
+            high_feats = high_feats.view(high_feats.size(0), -1)
+            high_feats = self.high_level_feats_fc(high_feats)
+
+            feats_prior = high_feats * feats_keep
+
+            if evaluating and random_feats:
+                # fill with noise the high level visual features, if the feature is masked/dropped
+                normal_dist = tdist.Normal(loc=get_mean(self.spade_blocks), scale=get_std(self.spade_blocks))
+                highlevel_noise = normal_dist.sample([high_feats.shape[0]])
+                feats_prior += highlevel_noise.cuda() * (1 - feats_keep)
+
+            # when a query image is used to generate an object of the same category
+            if query_feats is not None:
+                feats_prior[query_idx] = query_feats
+
+            if self.feats_in_gcn:
+                obj_vecs = torch.cat([obj_vecs, boxes_prior, feats_prior], dim=1)
+
+            else:
+                obj_vecs = torch.cat([obj_vecs, boxes_prior], dim=1)
+            obj_vecs = self.layer_norm(obj_vecs)
+
+        pred_vecs = self.pred_embeddings(p)
+
+        # GCN pass
+        if isinstance(self.gconv, nn.Linear):
+            obj_vecs = self.gconv(obj_vecs)
+        else:
+            obj_vecs, pred_vecs = self.gconv(obj_vecs, pred_vecs, edges)
+        if self.gconv_net is not None:
+            obj_vecs, pred_vecs = self.gconv_net(obj_vecs, pred_vecs, edges)
+
+        # Box prediction network
+        boxes_pred = self.box_net(obj_vecs)
+
+        # Mask prediction network
+        masks_pred = None
+        if self.mask_net is not None:
+            mask_scores = self.mask_net(obj_vecs.view(num_objs, -1, 1, 1))
+            masks_pred = mask_scores.squeeze(1).sigmoid()
+
+        if not (self.is_baseline or self.is_supervised) and self.feats_out_gcn:
+            obj_vecs = torch.cat([obj_vecs, feats_prior], 1)
+            obj_vecs = self.layer_norm2(obj_vecs)
+
+        use_predboxes = False
+
+        H, W = self.image_size
+
+        if self.is_baseline or self.is_supervised:
+
+            layout_boxes = boxes_pred if boxes_gt is None else boxes_gt
+            box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
+
+            box_keep = self.prepare_keep_idx(evaluating, box_ones, in_image.size(0), obj_to_img, keep_box_idx,
+                                                keep_feat_idx, with_feats=False)
+
+            # mask out objects
+            if not evaluating:
+                keep_image_idx = box_keep
+
+            for box_id in range(keep_image_idx.size(0)):
+                if keep_image_idx[box_id] == 0:
+                    in_image = mask_image_in_bbox(in_image, boxes_gt, box_id, obj_to_img)
+            generated = None
+
+        else:
+            if use_predboxes:
+                layout_boxes = boxes_pred
+            else:
+                layout_boxes = boxes_gt.clone()
+
+            if evaluating:
+                # should happen on evaluation only
+                # drop region in image corresponding to predicted box
+                # so that a new content/object is generated there
+                for idx in range(len(keep_box_idx)):
+                    if keep_box_idx[idx] == 0 and combine_gt_pred_box_idx[idx] == 0:
+                        in_image = mask_image_in_bbox(in_image, boxes_pred, idx, obj_to_img)
+                        layout_boxes[idx] = boxes_pred[idx]
+
+                    if keep_box_idx[idx] == 0 and combine_gt_pred_box_idx[idx] == 1:
+                        layout_boxes[idx] = combine_boxes(boxes_gt[idx], boxes_pred[idx])
+                        in_image = mask_image_in_bbox(in_image, layout_boxes, idx, obj_to_img)
+
+            generated = torch.zeros([obj_to_img.size(0)], device=obj_to_img.device,
+                                                        dtype=obj_to_img.dtype)
+            if not evaluating:
+                keep_image_idx = box_keep * feats_keep
+
+            for idx in range(len(keep_image_idx)):
+                if keep_image_idx[idx] == 0:
+                    in_image = mask_image_in_bbox(in_image, boxes_gt, idx, obj_to_img)
+                    generated[idx] = 1
+
+            generated = generated > 0
+
+        if masks_pred is None:
+            layout = boxes_to_layout(obj_vecs, layout_boxes, obj_to_img, H, W,
+                                     pooling=self.layout_pooling)
+        else:
+            layout_masks = masks_pred if masks_gt is None else masks_gt
+            layout = masks_to_layout(obj_vecs, layout_boxes, layout_masks,
+                                     obj_to_img, H, W, pooling=self.layout_pooling)#, front_idx=1-keep_box_idx)
+
+        noise_occluding = True
+
+        if self.image_feats_branch:
+
+            N, C, H, W = layout.size()
+            noise_shape = (N, 3, H, W)
+            if noise_occluding:
+                layout_noise = torch.randn(noise_shape, dtype=layout.dtype,
+                                           device=layout.device)
+            else:
+                layout_noise = torch.zeros(noise_shape, dtype=layout.dtype,
+                                           device=layout.device)
+
+            in_image[:, :3, :, :] = layout_noise * in_image[:, 3:4, :, :] + in_image[:, :3, :, :] * (
+                        1 - in_image[:, 3:4, :, :])
+            img_feats = self.conv_img(in_image)
+
+            layout = torch.cat([layout, img_feats], dim=1)
+
+        elif self.layout_noise_dim > 0:
+            N, C, H, W = layout.size()
+            noise_shape = (N, self.layout_noise_dim, H, W)
+            if self.is_supervised:
+                layout_noise = self.im_to_noise_conv(imgs_src)
+            else:
+                layout_noise = torch.randn(noise_shape, dtype=layout.dtype,
+                                       device=layout.device)
+
+            layout = torch.cat([layout, layout_noise], dim=1)
+
+        img = self.decoder_net(layout)
+
+        # visualize layout for debugging purposes
+        #if t % 50 == 0:
+        #    visualize_layout(img, in_image, visualize_layout, obj_vecs, layout_boxes, layout_masks,
+        #                     obj_to_img, H, W)
+        if get_layout_boxes:
+            return img, boxes_pred, masks_pred, in_image, generated, layout_boxes
+        else:
+            return img, boxes_pred, masks_pred, in_image, generated
+
+    def forward_visual_feats(self, img, boxes):
+        """
+        gets VGG visual features from an image and box
+        used for image query on evaluation time (evaluate_changes_vg.py)
+        - img: Tensor of size [1, 3, H, W]
+        - boxes: Tensor of size [4]
+        return: feature vector in the RoI
+        """
+
+        left, right, top, bottom = get_left_right_top_bottom(boxes, img.size(2), img.size(3))
+
+        obj_crop = img[0:1, :3, top:bottom, left:right]
+        obj_crop = F.upsample(obj_crop, size=(img.size(2) // 4, img.size(3) // 4), mode='bilinear', align_corners=True)
+
+        feats = self.high_level_feats(obj_crop)
+
+        feats = feats.view(feats.size(0), -1)
+        feats = self.high_level_feats_fc(feats)
+
+        return feats
+
+    def prepare_keep_idx(self, evaluating, box_ones, num_images, obj_to_img, keep_box_idx,
+                         keep_feat_idx, with_feats=True):
+        # random drop of boxes and visual feats on training time
+        # use objs idx passed as argument on eval time
+        imgbox_idx = torch.zeros(num_images, dtype=torch.int64)
+        for i in range(num_images):
+            imgbox_idx[i] = (obj_to_img == i).nonzero()[-1]
+
+        if evaluating:
+            if keep_box_idx is not None:
+                box_keep = keep_box_idx
+            else:
+                box_keep = box_ones
+
+            if with_feats:
+                if keep_feat_idx is not None:
+                    feats_keep = keep_feat_idx
+                else:
+                    feats_keep = box_ones
+        else:
+            # drop random box(es) and feature(s)
+            box_keep = F.dropout(box_ones, self.p_box, True, False) * (1 - self.p_box)
+            if with_feats:
+                feats_keep = F.dropout(box_ones, self.p, True, False) * (1 - self.p)
+
+        # image obj cannot be dropped
+        box_keep[imgbox_idx, :] = 1
+
+        if with_feats:
+            # image obj feats should not be dropped
+            feats_keep[imgbox_idx, :] = 1
+            return box_keep, feats_keep
+
+        else:
+            return box_keep
