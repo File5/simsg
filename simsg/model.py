@@ -25,6 +25,7 @@ from simsg.layout import boxes_to_layout, masks_to_layout
 from simsg.layers import build_mlp
 
 import random
+import functools
 import torchvision as T
 
 import cv2
@@ -628,7 +629,7 @@ class GATModel(nn.Module):
     SIMSG network. Given a source image and a scene graph, the model generates
     a manipulated image that satisfies the scene graph constellations
     """
-    def __init__(self, vocab, image_size=(64, 64), embedding_dim=64,
+    def __init__(self, vocab, image_size=(64, 64), embedding_dim=50,
                  gconv_dim=128, gconv_hidden_dim=512,
                  gconv_pooling='avg', gconv_num_layers=5,
                  decoder_dims=(1024, 512, 256, 128, 64),
@@ -638,7 +639,7 @@ class GATModel(nn.Module):
                  feats_in_gcn=False, feats_out_gcn=True, layout_pooling="sum",
                  spade_blocks=False, **kwargs):
 
-        super(SIMSGModel, self).__init__()
+        super(GATModel, self).__init__()
 
         if len(kwargs) > 0:
             print('WARNING: Model got unexpected kwargs ', kwargs)
@@ -659,8 +660,10 @@ class GATModel(nn.Module):
 
         num_objs = len(vocab['object_idx_to_name'])
         num_preds = len(vocab['pred_idx_to_name'])
-        self.obj_embeddings = nn.Embedding(num_objs + 1, embedding_dim)
-        self.pred_embeddings = nn.Embedding(num_preds, embedding_dim)
+        #self.obj_embeddings = nn.Embedding(num_objs + 1, embedding_dim)
+        #self.pred_embeddings = nn.Embedding(num_preds, embedding_dim)
+        self.obj_embeddings = self.load_glove_embeddings(['__zero__'] + vocab['object_idx_to_name'])
+        self.pred_embeddings = self.load_glove_embeddings(vocab['pred_idx_to_name'])
 
         if self.is_baseline or self.is_supervised:
             gconv_input_dims = embedding_dim
@@ -694,6 +697,24 @@ class GATModel(nn.Module):
 
         self.p = 0.25
         self.p_box = 0.35
+
+    def load_glove_embeddings(self, names):
+        weights = []
+        not_found = []
+        for name in names:
+            if name in glove.stoi:
+                weights.append(glove[name])
+            else:
+                words = name.strip('_').split(' ')
+                result = functools.reduce(lambda x, y: x + y, [glove[w] for w in words])
+                result = result / len(words)
+                weights.append(result)
+                not_found.append(name)
+        weights = torch.stack(weights)
+        if not_found:
+            import warnings
+            warnings.warn("Could not find embeddings for the following names: {}".format(not_found))
+        return torch.nn.Embedding.from_pretrained(weights, freeze=True)
 
     def build_obj_feats_net(self):
         # get VGG16 features for each object RoI

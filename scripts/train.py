@@ -38,6 +38,7 @@ from simsg.discriminators import PatchDiscriminator, AcCropDiscriminator, Multis
 from simsg.losses import get_gan_losses, gan_percept_loss, GANLoss, VGGLoss
 from simsg.metrics import jaccard
 from simsg.model import SIMSGModel
+from simsg.model import GATModel
 from simsg.utils import int_tuple
 from simsg.utils import timeit, bool_flag, LossManager
 
@@ -148,7 +149,7 @@ def build_model(args, vocab):
   if args.checkpoint_start_from is not None:
     checkpoint = torch.load(args.checkpoint_start_from)
     kwargs = checkpoint['model_kwargs']
-    model = SIMSGModel(**kwargs)
+    model = GATModel(**kwargs)
     raw_state_dict = checkpoint['model_state']
     state_dict = {}
     for k, v in raw_state_dict.items():
@@ -180,7 +181,7 @@ def build_model(args, vocab):
       'layout_pooling': args.layout_pooling
     }
 
-    model = SIMSGModel(**kwargs)
+    model = GATModel(**kwargs)
 
   return model, kwargs
 
