@@ -663,8 +663,8 @@ class GATModel(nn.Module):
         #self.obj_embeddings = nn.Embedding(num_objs + 1, embedding_dim)
         #self.pred_embeddings = nn.Embedding(num_preds, embedding_dim)
         #__image__ embedding is 'background'
-        self.obj_embeddings = self.load_glove_embeddings(['__zero__'] + vocab['object_idx_to_name'])
-        # multiple words - we can concatenate word embs; for single word - repeat twice
+        self.obj_embeddings = self.load_glove_embeddings(vocab['object_idx_to_name'])
+        # TODO: multiple words - we can concatenate word embs; for single word - repeat twice
         self.pred_embeddings = self.load_glove_embeddings(vocab['pred_idx_to_name'])
 
         if self.is_baseline or self.is_supervised:
@@ -700,12 +700,21 @@ class GATModel(nn.Module):
         self.p = 0.25
         self.p_box = 0.35
 
+        if self.image_feats_branch:
+            self.conv_img = nn.Sequential(
+                nn.Conv2d(4, layout_noise_dim, kernel_size=1, stride=1, padding=0),
+                nn.BatchNorm2d(layout_noise_dim),
+                nn.ReLU()
+            )
+
     def load_glove_embeddings(self, names):
         weights = []
         not_found = []
         for name in names:
             if name in glove.stoi:
                 weights.append(glove[name])
+            elif name == '__image__':
+                weights.append(glove['background'])
             else:
                 words = name.strip('_').split(' ')
                 result = functools.reduce(lambda x, y: x + y, [glove[w] for w in words])
@@ -828,34 +837,14 @@ class GATModel(nn.Module):
 
         pred_vecs = self.pred_embeddings(p)
 
-        # GCN pass
-        if isinstance(self.gconv, nn.Linear):
-            obj_vecs = self.gconv(obj_vecs)
-        else:
-            obj_vecs, pred_vecs = self.gconv(obj_vecs, pred_vecs, edges)
-        if self.gconv_net is not None:
-            obj_vecs, pred_vecs = self.gconv_net(obj_vecs, pred_vecs, edges)
-
-        # Box prediction network
-        boxes_pred = self.box_net(obj_vecs)
-
-        # Mask prediction network
-        masks_pred = None
-        if self.mask_net is not None:
-            mask_scores = self.mask_net(obj_vecs.view(num_objs, -1, 1, 1))
-            masks_pred = mask_scores.squeeze(1).sigmoid()
-
-        if not (self.is_baseline or self.is_supervised) and self.feats_out_gcn:
-            obj_vecs = torch.cat([obj_vecs, feats_prior], 1)
-            obj_vecs = self.layer_norm2(obj_vecs)
-
-        use_predboxes = False
+        # GAT pass
+        graph_features = self.gat(obj_vecs, pred_vecs, edges)
 
         H, W = self.image_size
 
         if self.is_baseline or self.is_supervised:
 
-            layout_boxes = boxes_pred if boxes_gt is None else boxes_gt
+            layout_boxes = boxes_gt
             box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
 
             box_keep = self.prepare_keep_idx(evaluating, box_ones, in_image.size(0), obj_to_img, keep_box_idx,
@@ -871,44 +860,10 @@ class GATModel(nn.Module):
             generated = None
 
         else:
-            if use_predboxes:
-                layout_boxes = boxes_pred
-            else:
-                layout_boxes = boxes_gt.clone()
+            layout_boxes = boxes_gt.clone()
 
-            if evaluating:
-                # should happen on evaluation only
-                # drop region in image corresponding to predicted box
-                # so that a new content/object is generated there
-                for idx in range(len(keep_box_idx)):
-                    if keep_box_idx[idx] == 0 and combine_gt_pred_box_idx[idx] == 0:
-                        in_image = mask_image_in_bbox(in_image, boxes_pred, idx, obj_to_img)
-                        layout_boxes[idx] = boxes_pred[idx]
-
-                    if keep_box_idx[idx] == 0 and combine_gt_pred_box_idx[idx] == 1:
-                        layout_boxes[idx] = combine_boxes(boxes_gt[idx], boxes_pred[idx])
-                        in_image = mask_image_in_bbox(in_image, layout_boxes, idx, obj_to_img)
-
-            generated = torch.zeros([obj_to_img.size(0)], device=obj_to_img.device,
-                                                        dtype=obj_to_img.dtype)
-            if not evaluating:
-                keep_image_idx = box_keep * feats_keep
-
-            for idx in range(len(keep_image_idx)):
-                if keep_image_idx[idx] == 0:
-                    in_image = mask_image_in_bbox(in_image, boxes_gt, idx, obj_to_img)
-                    generated[idx] = 1
-
-            generated = generated > 0
-
-        if masks_pred is None:
-            layout = boxes_to_layout(obj_vecs, layout_boxes, obj_to_img, H, W,
+        layout = boxes_to_layout(obj_vecs, layout_boxes, obj_to_img, H, W,
                                      pooling=self.layout_pooling)
-        else:
-            layout_masks = masks_pred if masks_gt is None else masks_gt
-            layout = masks_to_layout(obj_vecs, layout_boxes, layout_masks,
-                                     obj_to_img, H, W, pooling=self.layout_pooling)#, front_idx=1-keep_box_idx)
-
         noise_occluding = True
 
         if self.image_feats_branch:
@@ -939,16 +894,10 @@ class GATModel(nn.Module):
 
             layout = torch.cat([layout, layout_noise], dim=1)
 
-        img = self.decoder_net(layout)
-
-        # visualize layout for debugging purposes
-        #if t % 50 == 0:
-        #    visualize_layout(img, in_image, visualize_layout, obj_vecs, layout_boxes, layout_masks,
-        #                     obj_to_img, H, W)
         if get_layout_boxes:
-            return img, boxes_pred, masks_pred, in_image, generated, layout_boxes
+            return in_image, generated, layout_boxes
         else:
-            return img, boxes_pred, masks_pred, in_image, generated
+            return in_image, generated
 
     def forward_visual_feats(self, img, boxes):
         """
