@@ -662,7 +662,9 @@ class GATModel(nn.Module):
         num_preds = len(vocab['pred_idx_to_name'])
         #self.obj_embeddings = nn.Embedding(num_objs + 1, embedding_dim)
         #self.pred_embeddings = nn.Embedding(num_preds, embedding_dim)
+        #__image__ embedding is 'background'
         self.obj_embeddings = self.load_glove_embeddings(['__zero__'] + vocab['object_idx_to_name'])
+        # multiple words - we can concatenate word embs; for single word - repeat twice
         self.pred_embeddings = self.load_glove_embeddings(vocab['pred_idx_to_name'])
 
         if self.is_baseline or self.is_supervised:
