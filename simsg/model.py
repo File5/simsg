@@ -621,6 +621,7 @@ def combine_boxes(gt, pred):
 from dgl.nn.pytorch import GATConv
 
 from torchtext.vocab import GloVe
+from butd_image_captioning.utils import create_batched_graphs
 glove = GloVe("6B", dim=50)
 
 
@@ -895,9 +896,9 @@ class GATModel(nn.Module):
             layout = torch.cat([layout, layout_noise], dim=1)
 
         if get_layout_boxes:
-            return in_image, generated, layout_boxes
+            return graph_features, in_image, generated, layout_boxes
         else:
-            return in_image, generated
+            return graph_features, in_image, generated
 
     def forward_visual_feats(self, img, boxes):
         """
