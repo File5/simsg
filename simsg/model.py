@@ -668,7 +668,8 @@ class GATModel(nn.Module):
         # TODO: multiple words - we can concatenate word embs; for single word - repeat twice
         self.pred_embeddings = self.load_glove_embeddings(vocab['pred_idx_to_name'])
 
-        if self.is_baseline or self.is_supervised:
+        if True or self.is_baseline or self.is_supervised:
+            # TODO: obj_vecs concatenated features don't work
             gconv_input_dims = embedding_dim
         else:
             if self.feats_in_gcn:
@@ -802,7 +803,8 @@ class GATModel(nn.Module):
         if combine_gt_pred_box_idx is None:
             combine_gt_pred_box_idx = torch.zeros_like(objs)
 
-        if not (self.is_baseline or self.is_supervised):
+        if False and not (self.is_baseline or self.is_supervised):
+            # TODO: obj_vecs concatenated features don't work
 
             box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
             box_keep, feats_keep = self.prepare_keep_idx(evaluating, box_ones, in_image.size(0), obj_to_img,
@@ -839,7 +841,7 @@ class GATModel(nn.Module):
         pred_vecs = self.pred_embeddings(p)
 
         # GAT pass
-        graph_features = self.gat(obj_vecs, pred_vecs, edges)
+        graph_features = self.forward_gat(obj_vecs, pred_vecs, edges)
 
         H, W = self.image_size
 
@@ -899,6 +901,25 @@ class GATModel(nn.Module):
             return graph_features, in_image, generated, layout_boxes
         else:
             return graph_features, in_image, generated
+
+    def forward_gat(self, obj_vecs, pred_vecs, edges):
+        dtype, device = obj_vecs.dtype, obj_vecs.device
+        num_objs, num_triples = obj_vecs.size(0), pred_vecs.size(0)
+
+        # Break apart indices for subjects and objects; these have shape (num_triples,)
+        s_idx = edges[:, 0].contiguous()
+        o_idx = edges[:, 1].contiguous()
+
+        # Create single batch
+        batch_obj_vecs = obj_vecs.unsqueeze(0)
+        batch_obj_mask = torch.ones((1, num_objs), dtype=bool, device=device)
+        batch_pred_vecs = pred_vecs.unsqueeze(0)
+        batch_pred_mask = torch.ones((1, num_triples), dtype=bool, device=device)
+        batch_edges = edges.unsqueeze(0)
+        graphs = create_batched_graphs(batch_obj_vecs, batch_obj_mask, batch_pred_vecs, batch_pred_mask, batch_edges)
+        graphs = graphs.to(obj_vecs.device)
+        graph_features = self.gat(graphs, graphs.ndata['x'])
+        return graph_features
 
     def forward_visual_feats(self, img, boxes):
         """
