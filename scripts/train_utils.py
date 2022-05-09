@@ -45,11 +45,10 @@ def calculate_model_losses(args, skip_pixel_loss, img, img_pred, bbox, bbox_pred
   return total_loss, losses
 
 
-def init_checkpoint_dict(args, vocab, model_kwargs, d_obj_kwargs, d_img_kwargs):
+def init_checkpoint_dict(args, vocab, model_kwargs):
 
   ckpt = {
         'args': args.__dict__, 'vocab': vocab, 'model_kwargs': model_kwargs,
-        'd_obj_kwargs': d_obj_kwargs, 'd_img_kwargs': d_img_kwargs,
         'losses_ts': [], 'losses': defaultdict(list), 'd_losses': defaultdict(list),
         'checkpoint_ts': [], 'train_iou': [], 'val_losses': defaultdict(list),
         'val_iou': [], 'counters': {'t': None, 'epoch': None},

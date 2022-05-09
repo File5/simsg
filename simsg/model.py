@@ -626,13 +626,11 @@ from butd_image_captioning.utils import create_batched_graphs
 glove = GloVe("6B", dim=50)
 
 
-class DGLInput(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        graph, feat = x
-        return graph, feat
+class DGLSequential(nn.Sequential):
+    def forward(self, graph, feat):
+        for module in self._modules.values():
+            feat = module(graph, feat)
+        return feat
 
 
 class Concat(nn.Module):
@@ -713,7 +711,6 @@ class GATModel(nn.Module):
         gat_num_heads = 4
         #self.gat = GATConv(graph_features_dim, gat_out_dim, gat_num_heads)
         gat_layers = [
-            DGLInput(),
             GATConv(gat_input_dims, 64, 4),
             Concat(),
             #GATConv(64 * 4, 64, 4),
@@ -721,7 +718,7 @@ class GATModel(nn.Module):
             #GATConv(64 * 4, num_objs, 6),
             #Avg(),
         ]
-        self.gat = torch.nn.Sequential(*gat_layers)
+        self.gat = DGLSequential(*gat_layers)
 
         if not (self.is_baseline or self.is_supervised):
             self.high_level_feats = self.build_obj_feats_net()

@@ -325,25 +325,6 @@ def main(args):
   optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=args.learning_rate)
 
-  obj_discriminator, d_obj_kwargs = build_obj_discriminator(args, vocab)
-  img_discriminator, d_img_kwargs = build_img_discriminator(args, vocab)
-
-  gan_g_loss, gan_d_loss = get_gan_losses(args.gan_loss_type)
-
-  if obj_discriminator is not None:
-    obj_discriminator.type(float_dtype)
-    obj_discriminator.train()
-    print(obj_discriminator)
-    optimizer_d_obj = torch.optim.Adam(obj_discriminator.parameters(),
-                                       lr=args.learning_rate)
-
-  if img_discriminator is not None:
-    img_discriminator.type(float_dtype)
-    img_discriminator.train()
-    print(img_discriminator)
-
-    optimizer_d_img = torch.optim.Adam(img_discriminator.parameters(), lr= args.learning_rate)
-
   restore_path = None
   if args.checkpoint_start_from is not None:
     restore_path = args.checkpoint_start_from
@@ -360,14 +341,6 @@ def main(args):
     print(optimizer)
     #optimizer.load_state_dict(checkpoint['optim_state'])
 
-    if obj_discriminator is not None:
-      obj_discriminator.load_state_dict(checkpoint['d_obj_state'])
-      optimizer_d_obj.load_state_dict(checkpoint['d_obj_optim_state'])
-
-    if img_discriminator is not None:
-      img_discriminator.load_state_dict(checkpoint['d_img_state'])
-      optimizer_d_img.load_state_dict(checkpoint['d_img_optim_state'])
-
     t = checkpoint['counters']['t']
     print(t, args.eval_mode_after)
     if 0 <= args.eval_mode_after <= t:
@@ -377,7 +350,7 @@ def main(args):
     epoch = checkpoint['counters']['epoch']
   else:
     t, epoch = 0, 0
-    checkpoint = init_checkpoint_dict(args, vocab, model_kwargs, d_obj_kwargs, d_img_kwargs)
+    checkpoint = init_checkpoint_dict(args, vocab, model_kwargs)
 
   while True:
     if t >= args.num_iterations:
@@ -386,11 +359,6 @@ def main(args):
     print('Starting epoch %d' % epoch)
 
     for batch in tqdm.tqdm(train_loader):
-      if t == args.eval_mode_after:
-        print('switching to eval mode')
-        model.eval()
-        # filter to freeze feats net
-        optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.learning_rate)
       t += 1
       batch = [tensor.cuda() for tensor in batch]
       masks = None
@@ -417,81 +385,6 @@ def main(args):
                                 args, skip_pixel_loss, imgs, imgs_pred,
                                 boxes, boxes_pred)
 
-      if obj_discriminator is not None:
-
-        obj_discr_ids = model_out[4]
-
-        if obj_discr_ids is not None:
-          if args.selective_discr_obj and torch.sum(obj_discr_ids) > 0:
-
-            objs_ = objs[obj_discr_ids]
-            boxes_ = boxes[obj_discr_ids]
-            obj_to_img_ = obj_to_img[obj_discr_ids]
-
-          else:
-            objs_ = objs
-            boxes_ = boxes
-            obj_to_img_ = obj_to_img
-        else:
-          objs_ = objs
-          boxes_ = boxes
-          obj_to_img_ = obj_to_img
-
-        scores_fake, ac_loss, layers_fake_obj = obj_discriminator(imgs_pred, objs_, boxes_, obj_to_img_)
-
-        total_loss = add_loss(total_loss, ac_loss, losses, 'ac_loss',
-                              args.ac_loss_weight)
-        weight = args.discriminator_loss_weight * args.d_obj_weight
-        total_loss = add_loss(total_loss, gan_g_loss(scores_fake), losses,
-                              'g_gan_obj_loss', weight)
-
-      if img_discriminator is not None:
-        if not args.multi_discriminator:
-          scores_fake, layers_fake = img_discriminator(imgs_pred)
-
-          weight = args.discriminator_loss_weight * args.d_img_weight
-          total_loss = add_loss(total_loss, gan_g_loss(scores_fake), losses,
-                              'g_gan_img_loss', weight)
-          if args.weight_gan_feat != 0:
-
-            _, layers_real = img_discriminator(imgs)
-            total_loss = add_loss(total_loss, gan_percept_loss(layers_real, layers_fake), losses,
-                              'g_gan_percept_img_loss', weight * 10)
-        else:
-          fake_and_real = torch.cat([imgs_pred, imgs], dim=0)
-          discriminator_out = img_discriminator(fake_and_real)
-          scores_fake, scores_real = divide_pred(discriminator_out)
-
-          weight = args.discriminator_loss_weight * args.d_img_weight
-          criterionGAN = GANLoss()
-          img_g_loss = criterionGAN(scores_fake, True, for_discriminator=False)
-          total_loss = add_loss(total_loss, img_g_loss, losses,
-                              'g_gan_img_loss', weight)
-
-          if args.weight_gan_feat != 0:
-
-            criterionFeat = torch.nn.L1Loss()
-
-            num_D = len(scores_fake)
-            GAN_Feat_loss = torch.cuda.FloatTensor(1).fill_(0)
-            for i in range(num_D):  # for each discriminator
-                # last output is the final prediction, so we exclude it
-                num_intermediate_outputs = len(scores_fake[i]) - 1
-                for j in range(num_intermediate_outputs):  # for each layer output
-                    unweighted_loss = criterionFeat(
-                        scores_fake[i][j], scores_real[i][j].detach())
-                    GAN_Feat_loss += unweighted_loss * args.weight_gan_feat / num_D
-            total_loss = add_loss(total_loss, GAN_Feat_loss, losses,
-                                  'g_gan_feat_loss', 1.0)
-
-          if args.percept_weight != 0:
-
-            criterionVGG = VGGLoss()
-            percept_loss = criterionVGG(imgs_pred, imgs)
-
-            total_loss = add_loss(total_loss, percept_loss, losses,
-                                  'g_VGG', args.percept_weight)
-
       losses['total_loss'] = total_loss.item()
       if not math.isfinite(losses['total_loss']):
         print('WARNING: Got loss = NaN, not backpropping')
@@ -502,74 +395,8 @@ def main(args):
         total_loss.backward()
       optimizer.step()
 
-      if obj_discriminator is not None:
-        d_obj_losses = LossManager()
-        imgs_fake = imgs_pred.detach()
-
-        obj_discr_ids = model_out[4]
-
-        if obj_discr_ids is not None:
-          if args.selective_discr_obj and torch.sum(obj_discr_ids) > 0:
-
-            objs_ = objs[obj_discr_ids]
-            boxes_ = boxes[obj_discr_ids]
-            obj_to_img_ = obj_to_img[obj_discr_ids]
-
-          else:
-            objs_ = objs
-            boxes_ = boxes
-            obj_to_img_ = obj_to_img
-        else:
-          objs_ = objs
-          boxes_ = boxes
-          obj_to_img_ = obj_to_img
-
-        scores_fake, ac_loss_fake, _ = obj_discriminator(imgs_fake, objs_, boxes_, obj_to_img_)
-        scores_real, ac_loss_real, _ = obj_discriminator(imgs, objs_, boxes_, obj_to_img_)
-
-        d_obj_gan_loss = gan_d_loss(scores_real, scores_fake)
-        d_obj_losses.add_loss(d_obj_gan_loss, 'd_obj_gan_loss')
-        d_obj_losses.add_loss(ac_loss_real, 'd_ac_loss_real')
-        d_obj_losses.add_loss(ac_loss_fake, 'd_ac_loss_fake')
-
-        optimizer_d_obj.zero_grad()
-        d_obj_losses.total_loss.backward()
-        optimizer_d_obj.step()
-
-      if img_discriminator is not None:
-        d_img_losses = LossManager()
-        imgs_fake = imgs_pred.detach()
-
-        if not args.multi_discriminator:
-
-          scores_fake = img_discriminator(imgs_fake)
-          scores_real = img_discriminator(imgs)
-
-          d_img_gan_loss = gan_d_loss(scores_real[0], scores_fake[0])
-          d_img_losses.add_loss(d_img_gan_loss, 'd_img_gan_loss')
-
-        else:
-
-          fake_and_real = torch.cat([imgs_fake, imgs], dim=0)
-          discriminator_out = img_discriminator(fake_and_real)
-          scores_fake, scores_real = divide_pred(discriminator_out)
-
-          d_img_gan_loss = criterionGAN(scores_fake, False, for_discriminator=True) \
-                           + criterionGAN(scores_real, True, for_discriminator=True)
-
-          d_img_losses.add_loss(d_img_gan_loss, 'd_img_gan_loss')
-
-        optimizer_d_img.zero_grad()
-        d_img_losses.total_loss.backward()
-        optimizer_d_img.step()
-
       if t % args.print_every == 0:
-
         print_G_state(args, t, losses, writer, checkpoint)
-        if obj_discriminator is not None:
-          print_D_obj_state(args, t, writer, checkpoint, d_obj_losses)
-        if img_discriminator is not None:
-          print_D_img_state(args, t, writer, checkpoint, d_img_losses)
 
       if t % args.checkpoint_every == 0:
         print('checking on train')
@@ -610,14 +437,6 @@ def main(args):
           checkpoint['val_losses'][k].append(v)
           writer.add_scalar('Val {}'.format(k), v, global_step=t)
         checkpoint['model_state'] = model.state_dict()
-
-        if obj_discriminator is not None:
-          checkpoint['d_obj_state'] = obj_discriminator.state_dict()
-          checkpoint['d_obj_optim_state'] = optimizer_d_obj.state_dict()
-
-        if img_discriminator is not None:
-          checkpoint['d_img_state'] = img_discriminator.state_dict()
-          checkpoint['d_img_optim_state'] = optimizer_d_img.state_dict()
 
         checkpoint['optim_state'] = optimizer.state_dict()
         checkpoint['counters']['t'] = t
