@@ -325,6 +325,8 @@ def main(args):
   optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=args.learning_rate)
 
+  loss = torch.nn.CrossEntropyLoss()
+
   restore_path = None
   if args.checkpoint_start_from is not None:
     restore_path = args.checkpoint_start_from
@@ -376,14 +378,14 @@ def main(args):
 
         model_out = model(objs, triples, obj_to_img,
                           boxes_gt=model_boxes, masks_gt=model_masks, src_image=imgs_in, imgs_src=imgs_src, t=t)
-        imgs_pred, boxes_pred, masks_pred, layout_mask, _ = model_out
+        nodes_pred, num_objs = model_out
+        nodes_pred = nodes_pred[:num_objs]
 
       with timeit('loss', args.timing):
         # Skip the pixel loss if not using GT boxes
         skip_pixel_loss = (model_boxes is None)
-        total_loss, losses = calculate_model_losses(
-                                args, skip_pixel_loss, imgs, imgs_pred,
-                                boxes, boxes_pred)
+        losses = {}
+        total_loss = loss(nodes_pred, objs)
 
       losses['total_loss'] = total_loss.item()
       if not math.isfinite(losses['total_loss']):

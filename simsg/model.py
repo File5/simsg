@@ -629,7 +629,10 @@ glove = GloVe("6B", dim=50)
 class DGLSequential(nn.Sequential):
     def forward(self, graph, feat):
         for module in self._modules.values():
-            feat = module(graph, feat)
+            if type(module) is GATConv:
+                feat = module(graph, feat)
+            else:
+                graph, feat = module(graph, feat)
         return feat
 
 
@@ -652,6 +655,24 @@ class Concat(nn.Module):
             return args[:-1] + (x.view(*view_args), )
         else:
             return x.view(*view_args)
+
+
+class Avg(nn.Module):
+    def __init__(self, dim=-2):
+        super().__init__()
+        self.dim = dim
+    
+    def forward(self, *args):
+        assert len(args) > 0, "Expected at least one input tensor"
+        x = args[-1]
+        shape = list(x.size())
+        dim = self.dim
+        if dim < 0:
+            dim += len(shape)
+        if len(args) > 1:
+            return args[:-1] + (torch.mean(x, dim=dim), )
+        else:
+            return torch.mean(x, dim=dim)
 
 
 class GATModel(nn.Module):
@@ -713,10 +734,10 @@ class GATModel(nn.Module):
         gat_layers = [
             GATConv(gat_input_dims, 64, 4),
             Concat(),
-            #GATConv(64 * 4, 64, 4),
-            #Concat(),
-            #GATConv(64 * 4, num_objs, 6),
-            #Avg(),
+            GATConv(64 * 4, 64, 4),
+            Concat(),
+            GATConv(64 * 4, num_objs, 6),
+            Avg(),
         ]
         self.gat = DGLSequential(*gat_layers)
 
@@ -935,9 +956,9 @@ class GATModel(nn.Module):
             layout = torch.cat([layout, layout_noise], dim=1)
 
         if get_layout_boxes:
-            return graph_features, in_image, generated, layout_boxes
+            return graph_features, num_objs, layout_boxes
         else:
-            return graph_features, in_image, generated
+            return graph_features, num_objs
 
     def forward_gat(self, obj_vecs, pred_vecs, edges):
         dtype, device = obj_vecs.dtype, obj_vecs.device
@@ -955,7 +976,7 @@ class GATModel(nn.Module):
         batch_edges = edges.unsqueeze(0)
         graphs = create_batched_graphs(batch_obj_vecs, batch_obj_mask, batch_pred_vecs, batch_pred_mask, batch_edges)
         graphs = graphs.to(obj_vecs.device)
-        graph_features = self.gat((graphs, graphs.ndata['x']))
+        graph_features = self.gat(graphs, graphs.ndata['x'])
         return graph_features
 
     def forward_visual_feats(self, img, boxes):
