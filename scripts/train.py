@@ -58,11 +58,8 @@ def argument_parser():
 
   # Optimization hyperparameters
   parser.add_argument('--batch_size', default=32, type=int)
-  parser.add_argument('--num_iterations', default=300000, type=int)
+  parser.add_argument('--num_iterations', default=500, type=int)
   parser.add_argument('--learning_rate', default=2e-4, type=float)
-
-  # Switch the generator to eval mode after this many iterations
-  parser.add_argument('--eval_mode_after', default=100000, type=int)
 
   # Dataset options
   parser.add_argument('--image_size', default='64,64', type=int_tuple)
@@ -123,9 +120,9 @@ def argument_parser():
   parser.add_argument('--d_img_weight', default=1.0, type=float) # multiplied by d_loss_weight
 
   # Output options
-  parser.add_argument('--print_every', default=500, type=int)
+  parser.add_argument('--print_every', default=50, type=int)
   parser.add_argument('--timing', default=False, type=bool_flag)
-  parser.add_argument('--checkpoint_every', default=5000, type=int)
+  parser.add_argument('--checkpoint_every', default=500, type=int)
   parser.add_argument('--output_dir', default=os.getcwd())
   parser.add_argument('--checkpoint_name', default='checkpoint')
   parser.add_argument('--checkpoint_start_from', default=None)
@@ -234,8 +231,9 @@ def check_model(args, t, loader, model):
 
   num_samples = 0
   all_losses = defaultdict(list)
-  total_iou = 0
-  total_boxes = 0
+  total_correct = 0
+  total_objs = 0
+  loss = torch.nn.CrossEntropyLoss()
   with torch.no_grad():
     for batch in loader:
       batch = [tensor.cuda() for tensor in batch]
@@ -252,15 +250,18 @@ def check_model(args, t, loader, model):
 
       model_out = model(objs, triples, obj_to_img, boxes_gt=boxes, masks_gt=model_masks,
                         src_image=imgs_in, imgs_src=imgs_src)
-      imgs_pred, boxes_pred, masks_pred, _, _ = model_out
+      nodes_pred, num_objs = model_out
+      nodes_pred = nodes_pred[:num_objs]
+
+      node_classes_preds = torch.argmax(nodes_pred, dim=1)
+      correct = torch.sum(node_classes_preds - objs).item()
+      total = num_objs
+      total_correct += correct
+      total_objs += total
 
       skip_pixel_loss = False
-      total_loss, losses = calculate_model_losses(
-                                args, skip_pixel_loss, imgs, imgs_pred,
-                                boxes, boxes_pred)
-
-      total_iou += jaccard(boxes_pred, boxes)
-      total_boxes += boxes_pred.size(0)
+      total_loss = loss(nodes_pred, objs)
+      losses = {'total_loss': total_loss}
 
       for loss_name, loss_val in losses.items():
         all_losses[loss_name].append(loss_val)
@@ -268,42 +269,14 @@ def check_model(args, t, loader, model):
       if num_samples >= args.num_val_samples:
         break
 
-    samples = {}
-    samples['gt_img'] = imgs
+    # samples = {}
+    # samples['gt_img'] = imgs
 
-    model_out = model(objs, triples, obj_to_img, boxes_gt=boxes, masks_gt=masks, src_image=imgs_in, imgs_src=imgs_src)
-    samples['gt_box_gt_mask'] = model_out[0]
+    mean_losses = {k: np.mean(v.cpu()) for k, v in all_losses.items()}
+    accuracy = total_correct / total_objs
+    mean_losses['acc'] = accuracy
 
-    model_out = model(objs, triples, obj_to_img, boxes_gt=boxes, src_image=imgs_in, imgs_src=imgs_src)
-    samples['generated_img_gt_box'] = model_out[0]
-
-    samples['masked_img'] = model_out[3][:,:3,:,:]
-
-    for k, v in samples.items():
-      samples[k] = imagenet_deprocess_batch(v)
-
-    mean_losses = {k: np.mean(v) for k, v in all_losses.items()}
-    avg_iou = total_iou / total_boxes
-
-    masks_to_store = masks
-    if masks_to_store is not None:
-      masks_to_store = masks_to_store.data.cpu().clone()
-
-    masks_pred_to_store = masks_pred
-    if masks_pred_to_store is not None:
-      masks_pred_to_store = masks_pred_to_store.data.cpu().clone()
-
-  batch_data = {
-    'objs': objs.detach().cpu().clone(),
-    'boxes_gt': boxes.detach().cpu().clone(),
-    'masks_gt': masks_to_store,
-    'triples': triples.detach().cpu().clone(),
-    'obj_to_img': obj_to_img.detach().cpu().clone(),
-    'triple_to_img': triple_to_img.detach().cpu().clone(),
-    'boxes_pred': boxes_pred.detach().cpu().clone(),
-    'masks_pred': masks_pred_to_store
-  }
-  out = [mean_losses, samples, batch_data, avg_iou]
+  out = [mean_losses, accuracy]
 
   return tuple(out)
 
@@ -403,34 +376,17 @@ def main(args):
       if t % args.checkpoint_every == 0:
         print('checking on train')
         train_results = check_model(args, t, train_loader, model)
-        t_losses, t_samples, t_batch_data, t_avg_iou = train_results
-
-        checkpoint['checkpoint_ts'].append(t)
-        checkpoint['train_iou'].append(t_avg_iou)
+        t_losses, t_accuracy = train_results
 
         print('checking on val')
         val_results = check_model(args, t, val_loader, model)
-        val_losses, val_samples, val_batch_data, val_avg_iou = val_results
+        val_losses, val_accuracy = val_results
 
-        checkpoint['val_iou'].append(val_avg_iou)
-
-        # write images to tensorboard
-        train_samples_viz = torch.cat((t_samples['gt_img'][:args.max_num_imgs, :, :, :],
-                                       t_samples['masked_img'][:args.max_num_imgs, :, :, :],
-                                       t_samples['generated_img_gt_box'][:args.max_num_imgs, :, :, :]), dim=3)
-
-        val_samples_viz = torch.cat((val_samples['gt_img'][:args.max_num_imgs, :, :, :],
-                                     val_samples['masked_img'][:args.max_num_imgs, :, :, :],
-                                     val_samples['generated_img_gt_box'][:args.max_num_imgs, :, :, :]), dim=3)
-
-        writer.add_image('Train samples', make_grid(train_samples_viz, nrow=4, padding=4), global_step=t)
-        writer.add_image('Val samples', make_grid(val_samples_viz, nrow=4, padding=4), global_step=t)
-
-        print('train iou: ', t_avg_iou)
-        print('val iou: ', val_avg_iou)
+        print('train accuracy: ', t_accuracy)
+        print('val accuracy: ', val_accuracy)
         # write IoU to tensorboard
-        writer.add_scalar('train mIoU', t_avg_iou, global_step=t)
-        writer.add_scalar('val mIoU', val_avg_iou, global_step=t)
+        writer.add_scalar('train accuracy', t_accuracy, global_step=t)
+        writer.add_scalar('val accuracy', val_accuracy, global_step=t)
         # write losses to tensorboard
         for k, v in t_losses.items():
           writer.add_scalar('Train {}'.format(k), v, global_step=t)
