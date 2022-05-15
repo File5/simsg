@@ -123,6 +123,7 @@ def argument_parser():
   parser.add_argument('--print_every', default=50, type=int)
   parser.add_argument('--timing', default=False, type=bool_flag)
   parser.add_argument('--checkpoint_every', default=500, type=int)
+  parser.add_argument('--eval_mode_after', default=1000000, type=int)
   parser.add_argument('--output_dir', default=os.getcwd())
   parser.add_argument('--checkpoint_name', default='checkpoint')
   parser.add_argument('--checkpoint_start_from', default=None)
@@ -254,7 +255,7 @@ def check_model(args, t, loader, model):
       nodes_pred = nodes_pred[:num_objs]
 
       node_classes_preds = torch.argmax(nodes_pred, dim=1)
-      correct = torch.sum(node_classes_preds - objs).item()
+      correct = torch.sum(node_classes_preds == objs).item()
       total = num_objs
       total_correct += correct
       total_objs += total
@@ -272,7 +273,7 @@ def check_model(args, t, loader, model):
     # samples = {}
     # samples['gt_img'] = imgs
 
-    mean_losses = {k: np.mean(v.cpu()) for k, v in all_losses.items()}
+    mean_losses = {k: np.mean(list(map(lambda x: x.cpu(), v))) for k, v in all_losses.items()}
     accuracy = total_correct / total_objs
     mean_losses['acc'] = accuracy
 
