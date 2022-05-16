@@ -858,7 +858,7 @@ class GATModel(nn.Module):
 
         obj_vecs = self.obj_embeddings(objs)
         if hide_obj_mask is not None:
-            obj_vecs[hide_obj_mask] = self.hidden_obj_embedding
+            obj_vecs[hide_obj_mask] = self.hidden_obj_embedding.to(obj_vecs.device)
 
         if obj_to_img is None:
             obj_to_img = torch.zeros(num_objs, dtype=objs.dtype, device=objs.device)

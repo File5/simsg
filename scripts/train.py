@@ -286,7 +286,7 @@ def check_model(args, t, loader, model):
 
 def hide_nodes(args, objs):
   prob = args.hide_obj_prob
-  return torch.rand_like(objs) < prob
+  return torch.rand(objs.size()) < prob
 
 
 def main(args):
