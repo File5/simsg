@@ -68,6 +68,8 @@ def argument_parser():
   parser.add_argument('--shuffle_val', default=True, type=bool_flag)
   parser.add_argument('--loader_num_workers', default=4, type=int)
   parser.add_argument('--include_relationships', default=True, type=bool_flag)
+  parser.add_argument('--hide_obj_nodes', default=False, type=bool_flag)
+  parser.add_argument('--hide_obj_prob', default=0.0, type=float)
 
   parser.add_argument('--vg_image_dir', default=os.path.join(DATA_DIR, 'images'))
   parser.add_argument('--train_h5', default=os.path.join(DATA_DIR, 'train.h5'))
@@ -282,7 +284,14 @@ def check_model(args, t, loader, model):
   return tuple(out)
 
 
+def hide_nodes(args, objs):
+  prob = args.hide_obj_prob
+  return torch.rand_like(objs) < prob
+
+
 def main(args):
+  if args.hide_obj_nodes:
+    torch.manual_seed(0)
 
   print(args)
   check_args(args)
@@ -340,8 +349,11 @@ def main(args):
       masks = None
       imgs_src = None
 
+      hide_obj_mask = None
       if args.dataset == "vg" or (args.dataset == "clevr" and not args.is_supervised):
         imgs, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in = batch
+        if args.hide_obj_nodes:
+          hide_obj_mask = hide_nodes(args, objs)
       elif args.dataset == "clevr":
         imgs, imgs_src, objs, objs_src, boxes, boxes_src, triples, triples_src, obj_to_img, \
         triple_to_img, imgs_in = batch
@@ -351,7 +363,8 @@ def main(args):
         model_masks = masks
 
         model_out = model(objs, triples, obj_to_img,
-                          boxes_gt=model_boxes, masks_gt=model_masks, src_image=imgs_in, imgs_src=imgs_src, t=t)
+                          boxes_gt=model_boxes, masks_gt=model_masks, src_image=imgs_in, imgs_src=imgs_src, t=t,
+                          hide_obj_mask=hide_obj_mask)
         nodes_pred, num_objs = model_out
         nodes_pred = nodes_pred[:num_objs]
 
@@ -359,6 +372,7 @@ def main(args):
         # Skip the pixel loss if not using GT boxes
         skip_pixel_loss = (model_boxes is None)
         losses = {}
+        # Loss over all predictions
         total_loss = loss(nodes_pred, objs)
 
       losses['total_loss'] = total_loss.item()

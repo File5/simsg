@@ -741,6 +741,8 @@ class GATModel(nn.Module):
         ]
         self.gat = DGLSequential(*gat_layers)
 
+        self.hidden_obj_embedding = torch.normal(mean=0.0, std=1.0, size=(gat_input_dims, ))
+
         if not (self.is_baseline or self.is_supervised):
             self.high_level_feats = self.build_obj_feats_net()
             # freeze vgg
@@ -817,7 +819,8 @@ class GATModel(nn.Module):
 
     def forward(self, objs, triples, obj_to_img=None, boxes_gt=None, masks_gt=None, src_image=None, imgs_src=None,
                 keep_box_idx=None, keep_feat_idx=None, keep_image_idx=None, combine_gt_pred_box_idx=None,
-                query_feats=None, mode='train', t=0, query_idx=0, random_feats=False, get_layout_boxes=False):
+                query_feats=None, mode='train', t=0, query_idx=0, random_feats=False, get_layout_boxes=False,
+                hide_obj_mask=None):
         """
         Required Inputs:
         - objs: LongTensor of shape (num_objs,) giving categories for all objects
@@ -854,6 +857,8 @@ class GATModel(nn.Module):
         edges = torch.stack([s, o], dim=1)  # Shape is (num_triples, 2)
 
         obj_vecs = self.obj_embeddings(objs)
+        if hide_obj_mask is not None:
+            obj_vecs[hide_obj_mask] = self.hidden_obj_embedding
 
         if obj_to_img is None:
             obj_to_img = torch.zeros(num_objs, dtype=objs.dtype, device=objs.device)
