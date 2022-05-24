@@ -123,8 +123,8 @@ class SIMSGModel(nn.Module):
                 self.residual = False
 
             def set_gat(self):
-                #self.layers = ['gat', 'gcn', 'gat', 'gcn', 'gat']
-                self.layers = gat_layers
+                self.layers = ['gat', 'gat', 'gat']
+                #self.layers = gat_layers
                 self.use_obj_info = True
                 self.use_rel_info = True
                 self.k_update_steps = 1
@@ -414,7 +414,8 @@ class SIMSGModel(nn.Module):
 
     def forward(self, objs, triples, obj_to_img=None, boxes_gt=None, masks_gt=None, src_image=None, imgs_src=None,
                 keep_box_idx=None, keep_feat_idx=None, keep_image_idx=None, combine_gt_pred_box_idx=None,
-                query_feats=None, mode='train', t=0, query_idx=0, random_feats=False, get_layout_boxes=False):
+                query_feats=None, mode='train', t=0, query_idx=0, random_feats=False, get_layout_boxes=False,
+                hide_obj_mask=None):
         """
         Required Inputs:
         - objs: LongTensor of shape (num_objs,) giving categories for all objects

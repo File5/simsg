@@ -68,8 +68,8 @@ def argument_parser():
   parser.add_argument('--shuffle_val', default=True, type=bool_flag)
   parser.add_argument('--loader_num_workers', default=4, type=int)
   parser.add_argument('--include_relationships', default=True, type=bool_flag)
-  parser.add_argument('--hide_obj_nodes', default=False, type=bool_flag)
-  parser.add_argument('--hide_obj_prob', default=0.0, type=float)
+  parser.add_argument('--hide_obj_nodes', default=True, type=bool_flag)
+  parser.add_argument('--hide_obj_prob', default=0.5, type=float)
 
   parser.add_argument('--vg_image_dir', default=os.path.join(DATA_DIR, 'images'))
   parser.add_argument('--train_h5', default=os.path.join(DATA_DIR, 'train.h5'))
@@ -132,7 +132,7 @@ def argument_parser():
   parser.add_argument('--restore_from_checkpoint', default=True, type=bool_flag)
 
   # tensorboard options
-  parser.add_argument('--log_dir', default="./experiments/logs_aGCN_spade", type=str)
+  parser.add_argument('--log_dir', default="./experiments/wip_hide_50", type=str)
   parser.add_argument('--max_num_imgs', default=None, type=int)
 
   # SPADE options
@@ -149,6 +149,7 @@ def build_model(args, vocab):
   if args.checkpoint_start_from is not None:
     checkpoint = torch.load(args.checkpoint_start_from)
     kwargs = checkpoint['model_kwargs']
+    #model = SIMSGModel(**kwargs)
     model = GATModel(**kwargs)
     raw_state_dict = checkpoint['model_state']
     state_dict = {}
@@ -181,6 +182,7 @@ def build_model(args, vocab):
       'layout_pooling': args.layout_pooling
     }
 
+    #model = SIMSGModel(**kwargs)
     model = GATModel(**kwargs)
 
   return model, kwargs
@@ -231,6 +233,8 @@ def build_img_discriminator(args, vocab):
 
 
 def check_model(args, t, loader, model):
+
+  # TODO: add hidden nodes
 
   num_samples = 0
   all_losses = defaultdict(list)
@@ -420,9 +424,9 @@ def main(args):
                               '%s_model.pt' % (args.checkpoint_name))
 
         print('Saving checkpoint to ', checkpoint_path_latest)
-        torch.save(checkpoint, checkpoint_path_latest)
+        #torch.save(checkpoint, checkpoint_path_latest)
         if t % 10000 == 0 and t >= 100000:
-          torch.save(checkpoint, checkpoint_path_step)
+          pass#torch.save(checkpoint, checkpoint_path_step)
 
 
 if __name__ == '__main__':
