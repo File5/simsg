@@ -15,15 +15,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from turtle import forward
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from simsg.graph import GraphTripleConv, GraphTripleConvNet
+from simsg.graph import GraphTripleConv, GraphTripleConvNet, DisenTripletGCN, FactorTripletGCN, GAT
 from simsg.decoder import DecoderNetwork
 from simsg.layout import boxes_to_layout, masks_to_layout
 from simsg.layers import build_mlp
+#from simsg.VITAE import VITAE, mlp_decoder, decoder_vae_disen
 
 import random
 import functools
@@ -51,7 +51,7 @@ class SIMSGModel(nn.Module):
                  mask_size=None, mlp_normalization='none', layout_noise_dim=0,
                  img_feats_branch=True, feat_dims=128, is_baseline=False, is_supervised=False,
                  feats_in_gcn=False, feats_out_gcn=True, layout_pooling="sum",
-                 spade_blocks=False, **kwargs):
+                 spade_blocks=False, gcn_mode="GAT", gat_layers=None, is_disentangled=False, dis_objs=True, stn_type="affine", vitae_mode="uncond", **kwargs):
 
         super(SIMSGModel, self).__init__()
 
@@ -67,9 +67,17 @@ class SIMSGModel(nn.Module):
         self.spade_blocks = spade_blocks
         self.is_baseline = is_baseline
         self.is_supervised = is_supervised
+        self.is_disentangled = is_disentangled
+        self.dis_objs = dis_objs
+        self.stn_type = stn_type
+        self.vitae_mode = vitae_mode
+        print("Disentangled: ", is_disentangled, "STN Type: ", stn_type, "VITAE Mode: ", vitae_mode)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        #self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         if self.is_supervised:
-            self.im_to_noise_conv = nn.Conv2d(3, 32, 1, stride=1)
+            self.im_to_noise_conv = nn.Conv2d(3, 32, 1, stride=1).to(self.device)
 
         self.image_feats_branch = img_feats_branch
 
@@ -77,8 +85,8 @@ class SIMSGModel(nn.Module):
 
         num_objs = len(vocab['object_idx_to_name'])
         num_preds = len(vocab['pred_idx_to_name'])
-        self.obj_embeddings = nn.Embedding(num_objs + 1, embedding_dim)
-        self.pred_embeddings = nn.Embedding(num_preds, embedding_dim)
+        self.obj_embeddings = nn.Embedding(num_objs + 1, embedding_dim).to(self.device)
+        self.pred_embeddings = nn.Embedding(num_preds, embedding_dim).to(self.device)
 
         if self.is_baseline or self.is_supervised:
             gconv_input_dims = embedding_dim
@@ -88,43 +96,124 @@ class SIMSGModel(nn.Module):
             else:
                 gconv_input_dims = embedding_dim + 4
 
-        if gconv_num_layers == 0:
-            self.gconv = nn.Linear(gconv_input_dims, gconv_dim)
-        elif gconv_num_layers > 0:
-            gconv_kwargs = {
-                'input_dim_obj': gconv_input_dims,
-                'input_dim_pred': embedding_dim,
-                'output_dim': gconv_dim,
-                'hidden_dim': gconv_hidden_dim,
-                'pooling': gconv_pooling,
-                'mlp_normalization': mlp_normalization,
-            }
-            self.gconv = GraphTripleConv(**gconv_kwargs)
 
-        self.gconv_net = None
-        if gconv_num_layers > 1:
-            gconv_kwargs = {
-                'input_dim_obj': gconv_dim,
-                'input_dim_pred': gconv_dim,
-                'hidden_dim': gconv_hidden_dim,
-                'pooling': gconv_pooling,
-                'num_layers': gconv_num_layers - 1,
-                'mlp_normalization': mlp_normalization,
-            }
-            self.gconv_net = GraphTripleConvNet(**gconv_kwargs)
+        self.gcn_type = gcn_mode  # "FactorGCN" #or GCN, DisenGCN, FactorGCN
+        self.gat_layers = gat_layers
+
+        class Args:
+            def __init__(self):
+                super(Args, self).__init__()
+                self.input_dim_obj = gconv_input_dims
+                self.input_dim_pred = embedding_dim
+                self.hidden_dim = gconv_hidden_dim
+                self.out_dim = gconv_dim
+
+            def set_disengcn(self):
+                self.nlayer = 10  # 5 #gconv_num_layers
+                self.ncaps = 14  # 7
+                self.nhidden = 16  # 16 #gconv_hidden_dim
+                self.routit = 12  # 6
+                self.dropout = 0  # 0.35
+
+            def set_factorgnn(self):
+                self.num_layers = 2
+                self.num_hidden = 64
+                self.num_latent = 4
+                self.in_drop = 0.2
+                self.residual = False
+
+            def set_gat(self):
+                #self.layers = ['gat', 'gcn', 'gat', 'gcn', 'gat']
+                self.layers = gat_layers
+                self.use_obj_info = True
+                self.use_rel_info = True
+                self.k_update_steps = 1
+                self.update_relations = True
+                self.hidden_dim = gconv_hidden_dim
+                self.output_dim = gconv_dim
+                self.gconv_pooling = gconv_pooling
+                self.mlp_normalization = mlp_normalization
+
+        hyperpm = Args()
+
+        if self.gcn_type == "GCN":
+            print("Using GCN")
+            if gconv_num_layers == 0:
+                self.gconv = nn.Linear(gconv_input_dims, gconv_dim)
+            elif gconv_num_layers > 0:
+                gconv_kwargs = {
+                    'input_dim_obj': gconv_input_dims,
+                    'input_dim_pred': embedding_dim,
+                    'output_dim': gconv_dim,
+                    'hidden_dim': gconv_hidden_dim,
+                    'pooling': gconv_pooling,
+                    'mlp_normalization': mlp_normalization,
+                }
+                self.gconv = GraphTripleConv(**gconv_kwargs)
+                self.gconv = self.gconv.to(self.device)
+
+            self.gconv_net = None
+            if gconv_num_layers > 1:
+                gconv_kwargs = {
+                    'input_dim_obj': gconv_dim,
+                    'input_dim_pred': gconv_dim,
+                    'hidden_dim': gconv_hidden_dim,
+                    'pooling': gconv_pooling,
+                    'num_layers': gconv_num_layers - 1,
+                    'mlp_normalization': mlp_normalization,
+                }
+                self.gconv_net = GraphTripleConvNet(**gconv_kwargs)
+        elif self.gcn_type == "DisenGCN":
+            print("Using DisenGCN")
+
+            hyperpm.set_disengcn()
+
+            self.gconv_net = DisenTripletGCN(hyperpm)
+
+        elif self.gcn_type == "FactorGCN":
+            hyperpm.set_factorgnn()
+            print("Using FactorGCN")
+            self.gconv_net = FactorTripletGCN(hyperpm)
+
+        elif self.gcn_type == "GAT":
+            hyperpm.set_gat()
+            print("Using GAT")
+            self.gconv_net = GAT(hyperpm)
+
+        else:
+            raise
+
+        distributed = False
+        if distributed:
+            self.gconv_net = nn.DataParallel(self.gconv_net, device_ids=[0, 1])
+        self.gconv_net = self.gconv_net.to(self.device)
 
         box_net_dim = 4
         box_net_layers = [gconv_dim, gconv_hidden_dim, box_net_dim]
-        self.box_net = build_mlp(box_net_layers, batch_norm=mlp_normalization)
+        print(box_net_layers)
+        self.box_net = build_mlp(box_net_layers, batch_norm=mlp_normalization).to(self.device)
 
         self.mask_net = None
         if mask_size is not None and mask_size > 0:
-            self.mask_net = self._build_mask_net(gconv_dim, mask_size)
+            self.mask_net = self._build_mask_net(gconv_dim, mask_size).to(self.device)
 
         if self.is_baseline or not self.feats_out_gcn or self.is_supervised:
             ref_input_dim = gconv_dim + layout_noise_dim
         else:
             ref_input_dim = gconv_dim + layout_noise_dim + feat_dims
+
+        if self.is_disentangled:
+            print("Disentangled")
+            #self.latent_dim = 256
+            #self.mu_logvar_gen = nn.Linear(gconv_dim, self.latent_dim * 2)
+            if self.dis_objs:
+                self.VITAE = VITAE(gconv_dim, self.dis_objs, self.stn_type)
+                #print("vitae stn dim: ", self.VITAE.stn.dim())
+                self.vit_decoder = decoder_vae_disen(self.VITAE.stn.dim(), gconv_dim).to(self.device) #was 6
+            else:
+                self.VITAE = VITAE(ref_input_dim, self.dis_objs, self.stn_type).to(self.device) #was gconv_dim *image_size[0]*image_size[1]
+
+                self.vit_decoder = decoder_vae_disen(self.VITAE.stn.dim(), ref_input_dim*image_size[0]*image_size[1]).to(self.device) #was gconv_dim
 
         decoder_kwargs = {
             'dims': (ref_input_dim,) + decoder_dims,
@@ -134,37 +223,41 @@ class SIMSGModel(nn.Module):
             'source_image_dims': layout_noise_dim
         }
 
-        self.decoder_net = DecoderNetwork(**decoder_kwargs)#.to("cuda:1")
+        self.decoder_net = DecoderNetwork(**decoder_kwargs).to(self.device) #.to("cuda:1")
+        #if is_disentangled:
+            #self.decoder_net_2 = nn.Sequential(
+            #    DecoderNetwork(**decoder_kwargs),
+            #    nn.Softplus()).to("cuda:1")
 
         if self.image_feats_branch:
             self.conv_img = nn.Sequential(
                 nn.Conv2d(4, layout_noise_dim, kernel_size=1, stride=1, padding=0),
                 nn.BatchNorm2d(layout_noise_dim),
                 nn.ReLU()
-            )
+            ).to(self.device)
 
         if not (self.is_baseline or self.is_supervised):
-            self.high_level_feats = self.build_obj_feats_net()
+            self.high_level_feats = self.build_obj_feats_net().to(self.device)
             # freeze vgg
             for param in self.high_level_feats.parameters():
                 param.requires_grad = False
 
-            self.high_level_feats_fc = self.build_obj_feats_fc(feat_dims)
+            self.high_level_feats_fc = self.build_obj_feats_fc(feat_dims).to(self.device)
 
             if self.feats_in_gcn:
-                self.layer_norm = nn.LayerNorm(normalized_shape=embedding_dim + 4 + feat_dims)
+                self.layer_norm = nn.LayerNorm(normalized_shape=embedding_dim + 4 + feat_dims).to(self.device)
                 if self.feats_out_gcn:
-                    self.layer_norm2 = nn.LayerNorm(normalized_shape=gconv_dim + feat_dims)
+                    self.layer_norm2 = nn.LayerNorm(normalized_shape=gconv_dim + feat_dims).to(self.device)
             else:
-                self.layer_norm = nn.LayerNorm(normalized_shape=embedding_dim + 4)
-                self.layer_norm2 = nn.LayerNorm(normalized_shape=gconv_dim + feat_dims)
+                self.layer_norm = nn.LayerNorm(normalized_shape=embedding_dim + 4).to(self.device)
+                self.layer_norm2 = nn.LayerNorm(normalized_shape=gconv_dim + feat_dims).to(self.device)
 
         self.p = 0.25
         self.p_box = 0.35
 
     def build_obj_feats_net(self):
         # get VGG16 features for each object RoI
-        vgg_net = T.models.vgg16(pretrained=True)
+        vgg_net = T.models.vgg16(pretrained=True).to(self.device)
         layers = list(vgg_net.features._modules.values())[:-1]
 
         img_feats = nn.Sequential(*layers)
@@ -189,6 +282,135 @@ class SIMSGModel(nn.Module):
             raise ValueError('Mask size must be a power of 2')
         layers.append(nn.Conv2d(dim, output_dim, kernel_size=1))
         return nn.Sequential(*layers)
+
+    def reparameterize(self, mean, logvar):
+        """
+        Samples from a normal distribution using the reparameterization trick.
+        Parameters
+        ----------
+        mean : torch.Tensor
+            Mean of the normal distribution. Shape (batch_size, latent_dim)
+        logvar : torch.Tensor
+            Diagonal log variance of the normal distribution. Shape (batch_size,
+            latent_dim)
+        """
+        if self.training:
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            return mean + std * eps
+        else:
+            # Reconstruction mode
+            return mean
+
+    def obj_to_layout(self, obj_vecs, num_objs, feats_prior, boxes_gt, evaluating, in_image, obj_to_img, keep_box_idx,
+                                             keep_feat_idx, combine_gt_pred_box_idx, box_keep, feats_keep, imgs_src, masks_gt, keep_image_idx=None):
+        # Box prediction network
+        boxes_pred = self.box_net(obj_vecs)
+
+        # Mask prediction network
+        masks_pred = None
+        if self.mask_net is not None:
+            mask_scores = self.mask_net(obj_vecs.view(num_objs, -1, 1, 1))
+            masks_pred = mask_scores.squeeze(1).sigmoid()
+
+        if not (self.is_baseline or self.is_supervised) and self.feats_out_gcn:
+            obj_vecs = torch.cat([obj_vecs, feats_prior], 1)
+            obj_vecs = self.layer_norm2(obj_vecs)
+
+        use_predboxes = False
+
+        H, W = self.image_size
+
+        if self.is_baseline or self.is_supervised:
+
+            layout_boxes = boxes_pred if boxes_gt is None else boxes_gt
+            box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
+
+            box_keep = self.prepare_keep_idx(evaluating, box_ones, in_image.size(0), obj_to_img, keep_box_idx,
+                                             keep_feat_idx, with_feats=False)
+
+            # mask out objects
+            if not evaluating:
+                keep_image_idx = box_keep
+
+            for box_id in range(keep_image_idx.size(0)):
+                if keep_image_idx[box_id] == 0:
+                    in_image = mask_image_in_bbox(in_image, boxes_gt, box_id, obj_to_img)
+            generated = None
+
+        else:
+            if use_predboxes:
+                layout_boxes = boxes_pred
+            else:
+                layout_boxes = boxes_gt.clone()
+
+            if evaluating:
+                # should happen on evaluation only
+                # drop region in image corresponding to predicted box
+                # so that a new content/object is generated there
+                for idx in range(len(keep_box_idx)):
+                    if keep_box_idx[idx] == 0 and combine_gt_pred_box_idx[idx] == 0:
+                        in_image = mask_image_in_bbox(in_image, boxes_pred, idx, obj_to_img)
+                        layout_boxes[idx] = boxes_pred[idx]
+
+                    if keep_box_idx[idx] == 0 and combine_gt_pred_box_idx[idx] == 1:
+                        layout_boxes[idx] = combine_boxes(boxes_gt[idx], boxes_pred[idx])
+                        in_image = mask_image_in_bbox(in_image, layout_boxes, idx, obj_to_img)
+
+            generated = torch.zeros([obj_to_img.size(0)], device=obj_to_img.device,
+                                    dtype=obj_to_img.dtype)
+            if not evaluating:
+                keep_image_idx = box_keep * feats_keep
+
+            for idx in range(len(keep_image_idx)):
+                if keep_image_idx[idx] == 0:
+                    in_image = mask_image_in_bbox(in_image, boxes_gt, idx, obj_to_img)
+                    generated[idx] = 1
+
+            generated = generated > 0
+
+        if masks_pred is None:
+            layout = boxes_to_layout(obj_vecs, layout_boxes, obj_to_img, H, W,
+                                     pooling=self.layout_pooling)
+        else:
+            if evaluating:
+                layout_masks = masks_pred
+            else:
+                layout_masks = masks_pred if masks_gt is None else masks_gt
+            layout = masks_to_layout(obj_vecs, layout_boxes, layout_masks,
+                                     obj_to_img, H, W, pooling=self.layout_pooling)  # , front_idx=1-keep_box_idx)
+
+        noise_occluding = True
+
+        if self.image_feats_branch:
+
+            N, C, H, W = layout.size()
+            noise_shape = (N, 3, H, W)
+            if noise_occluding:
+                layout_noise = torch.randn(noise_shape, dtype=layout.dtype,
+                                           device=layout.device)
+            else:
+                layout_noise = torch.zeros(noise_shape, dtype=layout.dtype,
+                                           device=layout.device)
+
+            in_image[:, :3, :, :] = layout_noise * in_image[:, 3:4, :, :] + in_image[:, :3, :, :] * (
+                    1 - in_image[:, 3:4, :, :])
+            img_feats = self.conv_img(in_image)
+
+            layout = torch.cat([layout, img_feats], dim=1)
+
+        elif self.layout_noise_dim > 0:
+            N, C, H, W = layout.size()
+            noise_shape = (N, self.layout_noise_dim, H, W)
+            if self.is_supervised:
+                layout_noise = self.im_to_noise_conv(imgs_src)
+            else:
+                layout_noise = torch.randn(noise_shape, dtype=layout.dtype,
+                                           device=layout.device)
+
+            layout = torch.cat([layout, layout_noise], dim=1)
+
+        return layout, boxes_pred, masks_pred, generated #, layout_boxes
 
     def forward(self, objs, triples, obj_to_img=None, boxes_gt=None, masks_gt=None, src_image=None, imgs_src=None,
                 keep_box_idx=None, keep_feat_idx=None, keep_image_idx=None, combine_gt_pred_box_idx=None,
@@ -224,43 +446,51 @@ class SIMSGModel(nn.Module):
 
         in_image = src_image.clone()
         num_objs = objs.size(0)
-        s, p, o = triples.chunk(3, dim=1)  # All have shape (num_triples, 1)
+        s, p, o = triples.chunk(3, dim=1) # All have shape (num_triples, 1)
         s, p, o = [x.squeeze(1) for x in [s, p, o]]  # Now have shape (num_triples,)
-        edges = torch.stack([s, o], dim=1)  # Shape is (num_triples, 2)
+
+
+        edges = torch.stack([s, o], dim=1).to(self.device)  # Shape is (num_triples, 2)
 
         obj_vecs = self.obj_embeddings(objs)
+        #print("1", obj_vecs.device, objs.device)
 
         if obj_to_img is None:
             obj_to_img = torch.zeros(num_objs, dtype=objs.dtype, device=objs.device)
 
         if combine_gt_pred_box_idx is None:
-            combine_gt_pred_box_idx = torch.zeros_like(objs)
+            combine_gt_pred_box_idx = torch.zeros_like(objs, device=self.device)
 
         if not (self.is_baseline or self.is_supervised):
 
             box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
             box_keep, feats_keep = self.prepare_keep_idx(evaluating, box_ones, in_image.size(0), obj_to_img,
                                                          keep_box_idx, keep_feat_idx)
+            #box_keep = box_keep.to(self.device)
+            #feats_keep = feats_keep.to(self.device)
 
             boxes_prior = boxes_gt * box_keep
 
             obj_crop = get_cropped_objs(in_image, boxes_gt, obj_to_img, feats_keep, box_keep, evaluating, mode)
 
-            high_feats = self.high_level_feats(obj_crop)
+            high_feats = self.high_level_feats(obj_crop).to(self.device)
 
             high_feats = high_feats.view(high_feats.size(0), -1)
-            high_feats = self.high_level_feats_fc(high_feats)
+            high_feats = self.high_level_feats_fc(high_feats).to(self.device)
+            #print("1.1", high_feats.device, box_ones.device)
 
             feats_prior = high_feats * feats_keep
-
             if evaluating and random_feats:
                 # fill with noise the high level visual features, if the feature is masked/dropped
                 normal_dist = tdist.Normal(loc=get_mean(self.spade_blocks), scale=get_std(self.spade_blocks))
                 highlevel_noise = normal_dist.sample([high_feats.shape[0]])
-                feats_prior += highlevel_noise.cuda() * (1 - feats_keep)
+                if not self.is_disentangled:
+                    #feats_prior = feats_prior + (highlevel_noise.cuda() * (1 - feats_keep))
+                    feats_prior = feats_prior + (highlevel_noise * (1 - feats_keep))
 
             # when a query image is used to generate an object of the same category
             if query_feats is not None:
+                query_feats = query_feats.to(self.device)
                 feats_prior[query_idx] = query_feats
 
             if self.feats_in_gcn:
@@ -270,129 +500,132 @@ class SIMSGModel(nn.Module):
                 obj_vecs = torch.cat([obj_vecs, boxes_prior], dim=1)
             obj_vecs = self.layer_norm(obj_vecs)
 
-        pred_vecs = self.pred_embeddings(p)
+        pred_vecs = self.pred_embeddings(p).to(self.device)
+        #print("2", obj_vecs.device, pred_vecs.device)
+
+        if edges.max() > obj_vecs.shape[0] or edges.max() > pred_vecs.shape[0]:
+            print("we are doomed", edges.max(), obj_vecs.shape, pred_vecs.shape)
 
         # GCN pass
-        if isinstance(self.gconv, nn.Linear):
-            obj_vecs = self.gconv(obj_vecs)
-        else:
-            obj_vecs, pred_vecs = self.gconv(obj_vecs, pred_vecs, edges)
+        if self.gcn_type == "GCN":
+            if isinstance(self.gconv, nn.Linear):
+                obj_vecs = self.gconv(obj_vecs).to(self.device)
+            else:
+                obj_vecs, pred_vecs = self.gconv(obj_vecs, pred_vecs, edges)
+
+        if edges.max() >= obj_vecs.shape[0] or edges.max() >= pred_vecs.shape[0]:
+            print("we are doomed", edges.max(), obj_vecs.shape, pred_vecs.shape)
+            assert False
+
         if self.gconv_net is not None:
             obj_vecs, pred_vecs = self.gconv_net(obj_vecs, pred_vecs, edges)
 
-        # Box prediction network
-        boxes_pred = self.box_net(obj_vecs)
 
-        # Mask prediction network
-        masks_pred = None
-        if self.mask_net is not None:
-            mask_scores = self.mask_net(obj_vecs.view(num_objs, -1, 1, 1))
-            masks_pred = mask_scores.squeeze(1).sigmoid()
+        # Begin Disentangling
+        disentangled_v1 = False
+        disentangled_v2 = True
+        disentangled_v3 = True
 
-        if not (self.is_baseline or self.is_supervised) and self.feats_out_gcn:
-            obj_vecs = torch.cat([obj_vecs, feats_prior], 1)
-            obj_vecs = self.layer_norm2(obj_vecs)
+        if disentangled_v1:
+            mu_logvar = self.mu_logvar_gen(obj_vecs)
+            latent_dist = mu_logvar.view(-1, self.latent_dim, 2).unbind(-1)
+            latent_sample = self.reparameterize(*latent_dist)
+            obj_vecs = latent_sample
 
-        use_predboxes = False
+        if self.is_disentangled and self.dis_objs:
+            if self.vitae_mode == "uncond":
+                [z1, z2], [mu1, mu2], [var1, var2] = self.VITAE(obj_vecs)
+                theta_mean, theta_var = self.vit_decoder(z1)
 
-        H, W = self.image_size
-
-        if self.is_baseline or self.is_supervised:
-
-            layout_boxes = boxes_pred if boxes_gt is None else boxes_gt
-            box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
-
-            box_keep = self.prepare_keep_idx(evaluating, box_ones, in_image.size(0), obj_to_img, keep_box_idx,
-                                                keep_feat_idx, with_feats=False)
-
-            # mask out objects
-            if not evaluating:
-                keep_image_idx = box_keep
-
-            for box_id in range(keep_image_idx.size(0)):
-                if keep_image_idx[box_id] == 0:
-                    in_image = mask_image_in_bbox(in_image, boxes_gt, box_id, obj_to_img)
-            generated = None
-
-        else:
-            if use_predboxes:
-                layout_boxes = boxes_pred
+            elif self.vitae_mode == "cond":
+                mu1, var1, z1 = self.VITAE.forward_enc1(obj_vecs)
+                theta_mean, theta_var = self.vit_decoder(z1)
+                obj_vecs_new = self.VITAE.stn(obj_vecs[:,:, None, None], theta_mean, inverse=True) #.repeat(1, 1, 1, 1)
+                #print("Done transform 1")
+                mu2, var2, z2 = self.VITAE.forward_enc2(obj_vecs_new)
             else:
-                layout_boxes = boxes_gt.clone()
+                print("VITAE mode not supported!")
+                assert False
 
+            obj_vecs = z2
             if evaluating:
-                # should happen on evaluation only
-                # drop region in image corresponding to predicted box
-                # so that a new content/object is generated there
-                for idx in range(len(keep_box_idx)):
-                    if keep_box_idx[idx] == 0 and combine_gt_pred_box_idx[idx] == 0:
-                        in_image = mask_image_in_bbox(in_image, boxes_pred, idx, obj_to_img)
-                        layout_boxes[idx] = boxes_pred[idx]
+                #normal_dist = tdist.Normal(loc=get_mean(self.spade_blocks), scale=get_std(self.spade_blocks))
+                highlevel_noise = torch.randn_like(obj_vecs) #normal_dist.sample([obj_vecs.shape[0]])
+                obj_vecs = obj_vecs + (highlevel_noise.cuda() * (1 - feats_keep))
+                #obj_vecs = obj_vecs + (highlevel_noise * (1 - feats_keep))
 
-                    if keep_box_idx[idx] == 0 and combine_gt_pred_box_idx[idx] == 1:
-                        layout_boxes[idx] = combine_boxes(boxes_gt[idx], boxes_pred[idx])
-                        in_image = mask_image_in_bbox(in_image, layout_boxes, idx, obj_to_img)
 
-            generated = torch.zeros([obj_to_img.size(0)], device=obj_to_img.device,
-                                                        dtype=obj_to_img.dtype)
-            if not evaluating:
-                keep_image_idx = box_keep * feats_keep
+        # End Disentangling
+        layout, boxes_pred, masks_pred, generated = self.obj_to_layout(obj_vecs, num_objs, feats_prior, boxes_gt, evaluating, in_image, obj_to_img, keep_box_idx,
+                                             keep_feat_idx, combine_gt_pred_box_idx, box_keep, feats_keep, imgs_src, masks_gt, keep_image_idx) #, layout_boxes
+        #print("layout: ", layout.shape) #bsx 288x64x64
+        if self.is_disentangled and disentangled_v2 and disentangled_v3 and self.dis_objs:
+            for obj_num in range(obj_vecs.shape[0]):  # batch_size
+                im_id = obj_to_img[obj_num]
+                # print(img[im_id].shape)
+                x1, y1, x2, y2 = self.bbox_coordinates_with_margin(boxes_pred[obj_num], 0, layout[im_id])
+                # print("im_id: ", im_id, x1, y1, x2, y2)
+                if x2 <= x1+1 or y2 <= y1+1:
+                    continue
+                # im_patch = img[im_id, :, x1:x2, y1:y2]
+                # im_patch = im_patch.unsqueeze(0) #[None, :, :, :]
+                #print(layout.shape)
+                layout[im_id, :, y1:y2, x1:x2] = \
+                    self.VITAE.stn(layout[im_id, :, y1:y2, x1:x2].clone().unsqueeze(0), theta_mean[obj_num].unsqueeze(0),
+                                   inverse=False)[0]
+        
+        if self.is_disentangled and disentangled_v2 and not self.dis_objs:
+            layout_shape = layout.shape
+            [z1, z2], [mu1, mu2], [var1, var2] = self.VITAE(layout) #[0,0], [0,0], [0,0] #
+            theta_mean, theta_var = self.vit_decoder(z1)
+            layout = z2
+            layout = layout.view(layout_shape)
 
-            for idx in range(len(keep_image_idx)):
-                if keep_image_idx[idx] == 0:
-                    in_image = mask_image_in_bbox(in_image, boxes_gt, idx, obj_to_img)
-                    generated[idx] = 1
-
-            generated = generated > 0
-
-        if masks_pred is None:
-            layout = boxes_to_layout(obj_vecs, layout_boxes, obj_to_img, H, W,
-                                     pooling=self.layout_pooling)
-        else:
-            layout_masks = masks_pred if masks_gt is None else masks_gt
-            layout = masks_to_layout(obj_vecs, layout_boxes, layout_masks,
-                                     obj_to_img, H, W, pooling=self.layout_pooling)#, front_idx=1-keep_box_idx)
-
-        noise_occluding = True
-
-        if self.image_feats_branch:
-
-            N, C, H, W = layout.size()
-            noise_shape = (N, 3, H, W)
-            if noise_occluding:
-                layout_noise = torch.randn(noise_shape, dtype=layout.dtype,
-                                           device=layout.device)
-            else:
-                layout_noise = torch.zeros(noise_shape, dtype=layout.dtype,
-                                           device=layout.device)
-
-            in_image[:, :3, :, :] = layout_noise * in_image[:, 3:4, :, :] + in_image[:, :3, :, :] * (
-                        1 - in_image[:, 3:4, :, :])
-            img_feats = self.conv_img(in_image)
-
-            layout = torch.cat([layout, img_feats], dim=1)
-
-        elif self.layout_noise_dim > 0:
-            N, C, H, W = layout.size()
-            noise_shape = (N, self.layout_noise_dim, H, W)
-            if self.is_supervised:
-                layout_noise = self.im_to_noise_conv(imgs_src)
-            else:
-                layout_noise = torch.randn(noise_shape, dtype=layout.dtype,
-                                       device=layout.device)
-
-            layout = torch.cat([layout, layout_noise], dim=1)
-
+        
         img = self.decoder_net(layout)
+
+        # Encode/decode semantic space
+        if self.is_disentangled and disentangled_v2:
+            if not disentangled_v3:
+                for obj_num in range(obj_vecs.shape[0]): #batch_size
+                    im_id = obj_to_img[obj_num]
+                    x1, y1, x2, y2 = self.bbox_coordinates_with_margin(boxes_pred[obj_num], 0, img[im_id])
+                    if x2 <= x1 or y2 <= y1:
+                        continue
+                    # im_patch = img[im_id, :, x1:x2, y1:y2]
+                    #im_patch = im_patch.unsqueeze(0) #[None, :, :, :]
+                    print(img.shape)
+                    img[im_id, :, y1:y2, x1:x2] = self.VITAE.stn(img[im_id, :, y1:y2, x1:x2].clone().unsqueeze(0), theta_mean[obj_num], inverse=False)[0]
+
+            x_var = 0 #self.decoder_net_2(layout_var)
+            #x_mean = self.VITAE.stn(patches, theta_mean, inverse=False)
+            x_mean = img
+            #x_var = self.VITAE.stn(x_var, theta_mean, inverse=False)
+            vae_params = x_mean, x_var, [z1, z2], [mu1, mu2], [var1, var2]
+            img = x_mean
+            #x_var = switch * x_var + (1 - switch) * 0.02 ** 2
 
         # visualize layout for debugging purposes
         #if t % 50 == 0:
         #    visualize_layout(img, in_image, visualize_layout, obj_vecs, layout_boxes, layout_masks,
         #                     obj_to_img, H, W)
-        if get_layout_boxes:
-            return img, boxes_pred, masks_pred, in_image, generated, layout_boxes
+        #if get_layout_boxes:
+        #    return img, boxes_pred, masks_pred, in_image, generated, layout_boxes
+        # else:
+        if self.is_disentangled:
+            return img, boxes_pred, masks_pred, in_image, generated, vae_params #latent_dist, latent_sample
         else:
             return img, boxes_pred, masks_pred, in_image, generated
+
+    def bbox_coordinates_with_margin(self, bbox, margin, img):
+        # extract bounding box with a margin
+
+        left = max(0, bbox[0] * img.shape[2] - margin)
+        top = max(0, bbox[1] * img.shape[1] - margin)
+        right = min(img.shape[2], bbox[2] * img.shape[2] + margin)
+        bottom = min(img.shape[1], bbox[3] * img.shape[1] + margin)
+
+        return int(left), int(right), int(top), int(bottom)
 
     def forward_visual_feats(self, img, boxes):
         """
@@ -406,7 +639,7 @@ class SIMSGModel(nn.Module):
         left, right, top, bottom = get_left_right_top_bottom(boxes, img.size(2), img.size(3))
 
         obj_crop = img[0:1, :3, top:bottom, left:right]
-        obj_crop = F.upsample(obj_crop, size=(img.size(2) // 4, img.size(3) // 4), mode='bilinear', align_corners=True)
+        obj_crop = F.interpolate(obj_crop, size=(img.size(2) // 4, img.size(3) // 4), mode='bilinear', align_corners=True) #was upsample
 
         feats = self.high_level_feats(obj_crop)
 
@@ -419,7 +652,7 @@ class SIMSGModel(nn.Module):
                          keep_feat_idx, with_feats=True):
         # random drop of boxes and visual feats on training time
         # use objs idx passed as argument on eval time
-        imgbox_idx = torch.zeros(num_images, dtype=torch.int64)
+        imgbox_idx = torch.zeros(num_images, dtype=torch.int64, device=box_ones.device)
         for i in range(num_images):
             imgbox_idx[i] = (obj_to_img == i).nonzero()[-1]
 
@@ -556,7 +789,7 @@ def get_cropped_objs(imgs, boxes, obj_to_img, feats_keeps, boxes_keeps, evaluati
                 obj = imgs_masked[obj_to_img[i]:obj_to_img[i] + 1, :3, top:bottom, left:right]
             else:
                 obj = imgs[obj_to_img[i]:obj_to_img[i] + 1, :3, top:bottom, left:right]
-            obj = F.upsample(obj, size=(imgs.size(2) // 4, imgs.size(3) // 4), mode='bilinear', align_corners=True)
+            obj = F.interpolate(obj, size=(imgs.size(2) // 4, imgs.size(3) // 4), mode='bilinear', align_corners=True) #upsample
         except:
             # cropped object has H or W zero
             obj = torch.zeros([1, imgs.size(1) - 1, imgs.size(2) // 4, imgs.size(3) // 4],
