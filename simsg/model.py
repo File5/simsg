@@ -43,8 +43,8 @@ class SIMSGModel(nn.Module):
     SIMSG network. Given a source image and a scene graph, the model generates
     a manipulated image that satisfies the scene graph constellations
     """
-    def __init__(self, vocab, image_size=(64, 64), embedding_dim=64,
-                 gconv_dim=128, gconv_hidden_dim=512,
+    def __init__(self, vocab, image_size=(64, 64), embedding_dim=50,
+                 gconv_dim=128, gconv_hidden_dim=256,
                  gconv_pooling='avg', gconv_num_layers=5,
                  decoder_dims=(1024, 512, 256, 128, 64),
                  normalization='batch', activation='leakyrelu-0.2',
@@ -85,8 +85,8 @@ class SIMSGModel(nn.Module):
 
         num_objs = len(vocab['object_idx_to_name'])
         num_preds = len(vocab['pred_idx_to_name'])
-        self.obj_embeddings = nn.Embedding(num_objs + 1, embedding_dim).to(self.device)
-        self.pred_embeddings = nn.Embedding(num_preds, embedding_dim).to(self.device)
+        self.obj_embeddings = self.load_glove_embeddings(vocab['object_idx_to_name'])
+        self.pred_embeddings = self.load_glove_embeddings(vocab['pred_idx_to_name'])
 
         if self.is_baseline or self.is_supervised:
             gconv_input_dims = embedding_dim
@@ -99,6 +99,8 @@ class SIMSGModel(nn.Module):
 
         self.gcn_type = gcn_mode  # "FactorGCN" #or GCN, DisenGCN, FactorGCN
         self.gat_layers = gat_layers
+
+        gconv_dim = num_objs
 
         class Args:
             def __init__(self):
@@ -130,7 +132,7 @@ class SIMSGModel(nn.Module):
                 self.k_update_steps = 1
                 self.update_relations = True
                 self.hidden_dim = gconv_hidden_dim
-                self.output_dim = gconv_dim
+                self.output_dim = num_objs
                 self.gconv_pooling = gconv_pooling
                 self.mlp_normalization = mlp_normalization
 
@@ -188,47 +190,6 @@ class SIMSGModel(nn.Module):
             self.gconv_net = nn.DataParallel(self.gconv_net, device_ids=[0, 1])
         self.gconv_net = self.gconv_net.to(self.device)
 
-        box_net_dim = 4
-        box_net_layers = [gconv_dim, gconv_hidden_dim, box_net_dim]
-        print(box_net_layers)
-        self.box_net = build_mlp(box_net_layers, batch_norm=mlp_normalization).to(self.device)
-
-        self.mask_net = None
-        if mask_size is not None and mask_size > 0:
-            self.mask_net = self._build_mask_net(gconv_dim, mask_size).to(self.device)
-
-        if self.is_baseline or not self.feats_out_gcn or self.is_supervised:
-            ref_input_dim = gconv_dim + layout_noise_dim
-        else:
-            ref_input_dim = gconv_dim + layout_noise_dim + feat_dims
-
-        if self.is_disentangled:
-            print("Disentangled")
-            #self.latent_dim = 256
-            #self.mu_logvar_gen = nn.Linear(gconv_dim, self.latent_dim * 2)
-            if self.dis_objs:
-                self.VITAE = VITAE(gconv_dim, self.dis_objs, self.stn_type)
-                #print("vitae stn dim: ", self.VITAE.stn.dim())
-                self.vit_decoder = decoder_vae_disen(self.VITAE.stn.dim(), gconv_dim).to(self.device) #was 6
-            else:
-                self.VITAE = VITAE(ref_input_dim, self.dis_objs, self.stn_type).to(self.device) #was gconv_dim *image_size[0]*image_size[1]
-
-                self.vit_decoder = decoder_vae_disen(self.VITAE.stn.dim(), ref_input_dim*image_size[0]*image_size[1]).to(self.device) #was gconv_dim
-
-        decoder_kwargs = {
-            'dims': (ref_input_dim,) + decoder_dims,
-            'normalization': normalization,
-            'activation': activation,
-            'spade_blocks': spade_blocks,
-            'source_image_dims': layout_noise_dim
-        }
-
-        self.decoder_net = DecoderNetwork(**decoder_kwargs).to(self.device) #.to("cuda:1")
-        #if is_disentangled:
-            #self.decoder_net_2 = nn.Sequential(
-            #    DecoderNetwork(**decoder_kwargs),
-            #    nn.Softplus()).to("cuda:1")
-
         if self.image_feats_branch:
             self.conv_img = nn.Sequential(
                 nn.Conv2d(4, layout_noise_dim, kernel_size=1, stride=1, padding=0),
@@ -254,6 +215,26 @@ class SIMSGModel(nn.Module):
 
         self.p = 0.25
         self.p_box = 0.35
+
+    def load_glove_embeddings(self, names):
+        weights = []
+        not_found = []
+        for name in names:
+            if name in glove.stoi:
+                weights.append(glove[name])
+            elif name == '__image__':
+                weights.append(glove['background'])
+            else:
+                words = name.strip('_').split(' ')
+                result = functools.reduce(lambda x, y: x + y, [glove[w] for w in words])
+                result = result / len(words)
+                weights.append(result)
+                not_found.append(name)
+        weights = torch.stack(weights)
+        if not_found:
+            import warnings
+            warnings.warn("Could not find embeddings for the following names: {}".format(not_found))
+        return torch.nn.Embedding.from_pretrained(weights, freeze=True)
 
     def build_obj_feats_net(self):
         # get VGG16 features for each object RoI
@@ -521,102 +502,7 @@ class SIMSGModel(nn.Module):
         if self.gconv_net is not None:
             obj_vecs, pred_vecs = self.gconv_net(obj_vecs, pred_vecs, edges)
 
-
-        # Begin Disentangling
-        disentangled_v1 = False
-        disentangled_v2 = True
-        disentangled_v3 = True
-
-        if disentangled_v1:
-            mu_logvar = self.mu_logvar_gen(obj_vecs)
-            latent_dist = mu_logvar.view(-1, self.latent_dim, 2).unbind(-1)
-            latent_sample = self.reparameterize(*latent_dist)
-            obj_vecs = latent_sample
-
-        if self.is_disentangled and self.dis_objs:
-            if self.vitae_mode == "uncond":
-                [z1, z2], [mu1, mu2], [var1, var2] = self.VITAE(obj_vecs)
-                theta_mean, theta_var = self.vit_decoder(z1)
-
-            elif self.vitae_mode == "cond":
-                mu1, var1, z1 = self.VITAE.forward_enc1(obj_vecs)
-                theta_mean, theta_var = self.vit_decoder(z1)
-                obj_vecs_new = self.VITAE.stn(obj_vecs[:,:, None, None], theta_mean, inverse=True) #.repeat(1, 1, 1, 1)
-                #print("Done transform 1")
-                mu2, var2, z2 = self.VITAE.forward_enc2(obj_vecs_new)
-            else:
-                print("VITAE mode not supported!")
-                assert False
-
-            obj_vecs = z2
-            if evaluating:
-                #normal_dist = tdist.Normal(loc=get_mean(self.spade_blocks), scale=get_std(self.spade_blocks))
-                highlevel_noise = torch.randn_like(obj_vecs) #normal_dist.sample([obj_vecs.shape[0]])
-                obj_vecs = obj_vecs + (highlevel_noise.cuda() * (1 - feats_keep))
-                #obj_vecs = obj_vecs + (highlevel_noise * (1 - feats_keep))
-
-
-        # End Disentangling
-        layout, boxes_pred, masks_pred, generated = self.obj_to_layout(obj_vecs, num_objs, feats_prior, boxes_gt, evaluating, in_image, obj_to_img, keep_box_idx,
-                                             keep_feat_idx, combine_gt_pred_box_idx, box_keep, feats_keep, imgs_src, masks_gt, keep_image_idx) #, layout_boxes
-        #print("layout: ", layout.shape) #bsx 288x64x64
-        if self.is_disentangled and disentangled_v2 and disentangled_v3 and self.dis_objs:
-            for obj_num in range(obj_vecs.shape[0]):  # batch_size
-                im_id = obj_to_img[obj_num]
-                # print(img[im_id].shape)
-                x1, y1, x2, y2 = self.bbox_coordinates_with_margin(boxes_pred[obj_num], 0, layout[im_id])
-                # print("im_id: ", im_id, x1, y1, x2, y2)
-                if x2 <= x1+1 or y2 <= y1+1:
-                    continue
-                # im_patch = img[im_id, :, x1:x2, y1:y2]
-                # im_patch = im_patch.unsqueeze(0) #[None, :, :, :]
-                #print(layout.shape)
-                layout[im_id, :, y1:y2, x1:x2] = \
-                    self.VITAE.stn(layout[im_id, :, y1:y2, x1:x2].clone().unsqueeze(0), theta_mean[obj_num].unsqueeze(0),
-                                   inverse=False)[0]
-        
-        if self.is_disentangled and disentangled_v2 and not self.dis_objs:
-            layout_shape = layout.shape
-            [z1, z2], [mu1, mu2], [var1, var2] = self.VITAE(layout) #[0,0], [0,0], [0,0] #
-            theta_mean, theta_var = self.vit_decoder(z1)
-            layout = z2
-            layout = layout.view(layout_shape)
-
-        
-        img = self.decoder_net(layout)
-
-        # Encode/decode semantic space
-        if self.is_disentangled and disentangled_v2:
-            if not disentangled_v3:
-                for obj_num in range(obj_vecs.shape[0]): #batch_size
-                    im_id = obj_to_img[obj_num]
-                    x1, y1, x2, y2 = self.bbox_coordinates_with_margin(boxes_pred[obj_num], 0, img[im_id])
-                    if x2 <= x1 or y2 <= y1:
-                        continue
-                    # im_patch = img[im_id, :, x1:x2, y1:y2]
-                    #im_patch = im_patch.unsqueeze(0) #[None, :, :, :]
-                    print(img.shape)
-                    img[im_id, :, y1:y2, x1:x2] = self.VITAE.stn(img[im_id, :, y1:y2, x1:x2].clone().unsqueeze(0), theta_mean[obj_num], inverse=False)[0]
-
-            x_var = 0 #self.decoder_net_2(layout_var)
-            #x_mean = self.VITAE.stn(patches, theta_mean, inverse=False)
-            x_mean = img
-            #x_var = self.VITAE.stn(x_var, theta_mean, inverse=False)
-            vae_params = x_mean, x_var, [z1, z2], [mu1, mu2], [var1, var2]
-            img = x_mean
-            #x_var = switch * x_var + (1 - switch) * 0.02 ** 2
-
-        # visualize layout for debugging purposes
-        #if t % 50 == 0:
-        #    visualize_layout(img, in_image, visualize_layout, obj_vecs, layout_boxes, layout_masks,
-        #                     obj_to_img, H, W)
-        #if get_layout_boxes:
-        #    return img, boxes_pred, masks_pred, in_image, generated, layout_boxes
-        # else:
-        if self.is_disentangled:
-            return img, boxes_pred, masks_pred, in_image, generated, vae_params #latent_dist, latent_sample
-        else:
-            return img, boxes_pred, masks_pred, in_image, generated
+        return obj_vecs, num_objs
 
     def bbox_coordinates_with_margin(self, bbox, margin, img):
         # extract bounding box with a margin
