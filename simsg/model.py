@@ -838,15 +838,17 @@ class GATModel(nn.Module):
         # TODO: multiple words - we can concatenate word embs; for single word - repeat twice
         self.pred_embeddings = self.load_glove_embeddings(vocab['pred_idx_to_name'])
 
-        if True or self.is_baseline or self.is_supervised:
-            # TODO: obj_vecs concatenated features don't work
+        if self.is_baseline or self.is_supervised:
             gconv_input_dims = embedding_dim
+            pooled_feat_dim = embedding_dim
         else:
             if self.feats_in_gcn:
                 gconv_input_dims = embedding_dim + 4 + feat_dims
+                pooled_feat_dim = 128
             else:
                 gconv_input_dims = embedding_dim + 4
-        gat_input_dims = gconv_input_dims
+                pooled_feat_dim = embedding_dim
+        gat_input_dims = pooled_feat_dim
         gat_dim = gconv_dim
 
         gat_num_heads = 4
@@ -861,7 +863,7 @@ class GATModel(nn.Module):
         ]
         self.gat = DGLSequential(*gat_layers)
 
-        self.hidden_obj_embedding = torch.normal(mean=0.0, std=1.0, size=(gat_input_dims, ))
+        self.hidden_obj_embedding = torch.normal(mean=0.0, std=1.0, size=(embedding_dim, ))
 
         if not (self.is_baseline or self.is_supervised):
             self.high_level_feats = self.build_obj_feats_net()
@@ -878,6 +880,13 @@ class GATModel(nn.Module):
             else:
                 self.layer_norm = nn.LayerNorm(normalized_shape=embedding_dim + 4)
                 self.layer_norm2 = nn.LayerNorm(normalized_shape=gconv_dim + feat_dims)
+
+            self.graph_feat_pool = GraphTripleConv(
+                input_dim_obj=gconv_input_dims,
+                input_dim_pred=embedding_dim,
+                output_dim=pooled_feat_dim,
+                hidden_dim=gconv_hidden_dim
+            )
 
         self.p = 0.25
         self.p_box = 0.35
@@ -986,9 +995,7 @@ class GATModel(nn.Module):
         if combine_gt_pred_box_idx is None:
             combine_gt_pred_box_idx = torch.zeros_like(objs)
 
-        if False and not (self.is_baseline or self.is_supervised):
-            # TODO: obj_vecs concatenated features don't work
-
+        if not (self.is_baseline or self.is_supervised):
             box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
             box_keep, feats_keep = self.prepare_keep_idx(evaluating, box_ones, in_image.size(0), obj_to_img,
                                                          keep_box_idx, keep_feat_idx)
@@ -1024,6 +1031,8 @@ class GATModel(nn.Module):
         pred_vecs = self.pred_embeddings(p)
 
         # GAT pass
+        if not (self.is_baseline or self.is_supervised):
+            obj_vecs, pred_vecs = self.graph_feat_pool(obj_vecs, pred_vecs, edges)
         graph_features = self.forward_gat(obj_vecs, pred_vecs, edges)
 
         H, W = self.image_size

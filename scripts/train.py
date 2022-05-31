@@ -20,6 +20,16 @@ Script to train SIMSG
 """
 
 import argparse
+import warnings
+warnings.orig_warn = warnings.warn
+def warn(*args, **kwargs):
+  if len(args) >= 2 and args[1] is DeprecationWarning:
+    pass
+  else:
+    warnings.orig_warn(*args, **kwargs)
+warnings.warn = warn
+#warnings.simplefilter('ignore', DeprecationWarning)
+#warnings.simplefilter('once', message="DeprecationWarning: `np.float`")
 
 import os
 import math
@@ -122,9 +132,9 @@ def argument_parser():
   parser.add_argument('--d_img_weight', default=1.0, type=float) # multiplied by d_loss_weight
 
   # Output options
-  parser.add_argument('--print_every', default=50, type=int)
+  parser.add_argument('--print_every', default=5, type=int)
   parser.add_argument('--timing', default=False, type=bool_flag)
-  parser.add_argument('--checkpoint_every', default=500, type=int)
+  parser.add_argument('--checkpoint_every', default=10, type=int)
   parser.add_argument('--eval_mode_after', default=1000000, type=int)
   parser.add_argument('--output_dir', default=os.getcwd())
   parser.add_argument('--checkpoint_name', default='checkpoint')
@@ -132,7 +142,7 @@ def argument_parser():
   parser.add_argument('--restore_from_checkpoint', default=True, type=bool_flag)
 
   # tensorboard options
-  parser.add_argument('--log_dir', default="./experiments/wip_hide_50", type=str)
+  parser.add_argument('--log_dir', default="./experiments/imgfp_hide_50", type=str)
   parser.add_argument('--max_num_imgs', default=None, type=int)
 
   # SPADE options
