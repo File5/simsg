@@ -42,6 +42,7 @@ conda activate simsg_env          # activate virtual environment
 # install pytorch and cuda version as tested in our work
 conda install pytorch==1.2.0 torchvision==0.4.0 cudatoolkit=10.0 -c pytorch
 conda install -c pytorch torchtext
+pip install torch-scatter torch-sparse torch-cluster torch-spline-conv torch-geometric -f https://data.pyg.org/whl/torch-1.11.0+cu102.html
 # more installations
 pip install opencv-python tensorboardx grave addict
 # to add current directory to python path run
