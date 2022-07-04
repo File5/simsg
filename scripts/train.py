@@ -134,7 +134,7 @@ def argument_parser():
   # Output options
   parser.add_argument('--print_every', default=5, type=int)
   parser.add_argument('--timing', default=False, type=bool_flag)
-  parser.add_argument('--checkpoint_every', default=10, type=int)
+  parser.add_argument('--checkpoint_every', default=50, type=int)
   parser.add_argument('--eval_mode_after', default=1000000, type=int)
   parser.add_argument('--output_dir', default=os.getcwd())
   parser.add_argument('--checkpoint_name', default='checkpoint')
@@ -434,7 +434,7 @@ def main(args):
                               '%s_model.pt' % (args.checkpoint_name))
 
         print('Saving checkpoint to ', checkpoint_path_latest)
-        #torch.save(checkpoint, checkpoint_path_latest)
+        torch.save(checkpoint, checkpoint_path_latest)
         if t % 10000 == 0 and t >= 100000:
           pass#torch.save(checkpoint, checkpoint_path_step)
 
