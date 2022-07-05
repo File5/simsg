@@ -743,7 +743,9 @@ from dgl.nn.pytorch import GATConv
 
 from torchtext.vocab import GloVe
 from butd_image_captioning.utils import create_batched_graphs
+from simsg.data.wordnet import WordNet18
 glove = GloVe("6B", dim=50)
+wordnet = WordNet18("datasets/wordnet18")
 
 
 class DGLSequential(nn.Sequential):
@@ -897,6 +899,9 @@ class GATModel(nn.Module):
                 nn.BatchNorm2d(layout_noise_dim),
                 nn.ReLU()
             )
+
+    def extend_vocab_wordnet(vocab, neighbors=2):
+        pass
 
     def load_glove_embeddings(self, names):
         weights = []

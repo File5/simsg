@@ -105,7 +105,7 @@ def argument_parser():
   parser.add_argument('--selective_discr_obj', default=True, type=bool_flag)
   parser.add_argument('--feats_in_gcn', default=True, type=bool_flag)
   parser.add_argument('--feats_out_gcn', default=True, type=bool_flag)
-  parser.add_argument('--is_baseline', default=False, type=int)
+  parser.add_argument('--is_baseline', default=True, type=int)
   parser.add_argument('--is_supervised', default=False, type=int)
 
   # Generator losses
@@ -142,7 +142,7 @@ def argument_parser():
   parser.add_argument('--restore_from_checkpoint', default=True, type=bool_flag)
 
   # tensorboard options
-  parser.add_argument('--log_dir', default="./experiments/imgfp_hide_50", type=str)
+  parser.add_argument('--log_dir', default="./experiments/wn2n_hide_50", type=str)
   parser.add_argument('--max_num_imgs', default=None, type=int)
 
   # SPADE options
@@ -434,7 +434,7 @@ def main(args):
                               '%s_model.pt' % (args.checkpoint_name))
 
         print('Saving checkpoint to ', checkpoint_path_latest)
-        torch.save(checkpoint, checkpoint_path_latest)
+        #torch.save(checkpoint, checkpoint_path_latest)
         if t % 10000 == 0 and t >= 100000:
           pass#torch.save(checkpoint, checkpoint_path_step)
 
