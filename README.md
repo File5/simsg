@@ -45,6 +45,7 @@ conda install -c pytorch torchtext
 pip install torch-scatter==2.0.4 torch-sparse==0.6.1 -f https://data.pyg.org/whl/torch-1.4.0+cu101.html
 pip install torch-geometric
 conda install -c dglteam dgl-cuda10.1=0.4.3
+pip install nltk
 #conda install --force --no-deps -c pyg pytorch-scatter
 #conda install --no-deps -c pyg  pytorch-sparse
 #conda install --no-deps -c rusty1s  pytorch-geometric

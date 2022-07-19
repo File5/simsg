@@ -746,6 +746,21 @@ from butd_image_captioning.utils import create_batched_graphs
 from simsg.data.wordnet import WordNet18
 glove = GloVe("6B", dim=50)
 wordnet = WordNet18("datasets/wordnet18")
+import nltk
+nltk.download('wordnet')
+from nltk.corpus import wordnet as wordnet_corpus
+
+def build_wordnet_neighbors_dict(wordnet):
+    result = {}
+    data = wordnet.data
+    for (src_id, dst_id), edg_id in zip(data.edge_index.T, data.edge_type):
+        src_id, dst_id, edg_id = tuple(map(lambda x: x.item(), (src_id, dst_id, edg_id)))
+        src_synset = wordnet.id2entity[src_id]
+        dst_synset = wordnet.id2entity[dst_id]
+        src_neighbors = result.setdefault(src_synset, [])
+        src_neighbors.append((dst_synset, edg_id))
+    return result
+wordnet_neighbors = build_wordnet_neighbors_dict(wordnet)
 
 
 class DGLSequential(nn.Sequential):
@@ -836,6 +851,7 @@ class GATModel(nn.Module):
         #self.obj_embeddings = nn.Embedding(num_objs + 1, embedding_dim)
         #self.pred_embeddings = nn.Embedding(num_preds, embedding_dim)
         #__image__ embedding is 'background'
+        self.extend_vocab_wordnet(vocab)
         self.obj_embeddings = self.load_glove_embeddings(vocab['object_idx_to_name'])
         # TODO: multiple words - we can concatenate word embs; for single word - repeat twice
         self.pred_embeddings = self.load_glove_embeddings(vocab['pred_idx_to_name'])
@@ -900,8 +916,59 @@ class GATModel(nn.Module):
                 nn.ReLU()
             )
 
-    def extend_vocab_wordnet(vocab, neighbors=2):
-        pass
+    def extend_vocab_wordnet(self, vocab, neighbors=2):
+        extension = {'object_names': [], 'pred_names': []}
+        sources = [w + '.n.01' for w in vocab['object_idx_to_name']]
+        existing = set(sources)
+        found = []
+        not_found = []
+        preds = set()
+        for n in range(neighbors):
+            for s in sources:
+                neighbors = wordnet_neighbors.get(s)
+                if neighbors is None:
+                    # try one more time with the 1st synset of the same meaning
+                    try:
+                        wn_s = wordnet_corpus.synset(s).name()
+                        neighbors = wordnet_neighbors.get(wn_s)
+                        if neighbors is None:
+                            raise ValueError('synset not found')
+                    except Exception:
+                        not_found.append(s)
+                        continue
+                
+                preds.update(map(lambda x: x[1], neighbors))
+                neighbors = list(map(lambda x: x[0], neighbors))
+                neighbors = {x for x in neighbors if x not in existing}
+                found.extend(neighbors)
+                existing.update(neighbors)
+            #assert len(found) == len(set(found))
+            extension['object_names'].extend(found)
+            sources = found
+            found = []
+        
+        if len(not_found) > 0:
+            import warnings
+            warnings.warn("Could not find neighbors for the following names (count = {}): {}".format(len(not_found), not_found))
+        #assert len(extention) == len(set(extention))
+        pred_names = [wordnet.id2edge[i] for i in preds]
+        extension['pred_names'].extend(pred_names)
+        
+        start_idx = len(vocab['object_idx_to_name'])
+        vocab['object_name_to_idx'].update(
+            {name: start_idx + idx for idx, name in enumerate(extension['object_names'])}
+        )
+        vocab['object_idx_to_name'].extend(extension['object_names'])
+        
+        start_idx = len(vocab['pred_idx_to_name'])
+        vocab['pred_name_to_idx'].update(
+            {name: start_idx + idx for idx, name in enumerate(extension['pred_names'])}
+        )
+        vocab['pred_idx_to_name'].extend(extension['pred_names'])
+
+        assert all([vocab['object_name_to_idx'][name] == idx for idx, name in enumerate(vocab['object_idx_to_name'])])
+        assert all([vocab['pred_name_to_idx'][name] == idx for idx, name in enumerate(vocab['pred_idx_to_name'])])
+        return
 
     def load_glove_embeddings(self, names):
         weights = []
