@@ -30,6 +30,9 @@ import PIL
 
 from .utils import imagenet_preprocess, Resize
 
+from simsg.data.wordnet import WordNet18
+from scripts.preprocess_vg import build_wordnet_neighbors_dict
+
 
 class SceneGraphNoPairsDataset(Dataset):
   def __init__(self, vocab, h5_path, image_dir, image_size=(256, 256),
@@ -71,6 +74,9 @@ class SceneGraphNoPairsDataset(Dataset):
           self.image_paths = list(v)
         else:
           self.data[k] = torch.IntTensor(np.asarray(v))
+
+    self.wordnet = WordNet18("datasets/wordnet18")
+    self.wordnet_neighbors = build_wordnet_neighbors_dict(self.wordnet)
 
   def __len__(self):
     num = self.data['object_names'].size(0)
@@ -167,6 +173,31 @@ class SceneGraphNoPairsDataset(Dataset):
         counter += 1
 
       obj_idx_mapping[obj_idx] = map_overlapping_obj[i]
+
+    # Extend with WordNet objects
+    seen_objs = set(objs)
+    extend_objs = []
+    for obj_idx, box in zip(objs, boxes):
+      obj_name = self.vocab['object_idx_to_name'][obj_idx]
+      obj_synset = self.vocab['names_to_synsets'].get(obj_name, obj_name)
+      if obj_synset in self.wordnet_neighbors:
+        for neighbor_synset, edge_idx in self.wordnet_neighbors[obj_synset]:
+          try:
+            neighbor_idx = self.vocab['object_name_to_idx'][neighbor_synset]
+          except KeyError:
+            try:
+              neighbor_name = self.vocab['synsets_to_names'][neighbor_synset]
+              neighbor_idx = self.vocab['object_name_to_idx'][neighbor_name]
+            except Exception:
+              pass  # further than n_neighbor
+          if neighbor_idx not in seen_objs:
+            extend_objs.append(neighbor_idx)
+            i = len(map_overlapping_obj)
+            map_overlapping_obj[i] = i
+            obj_idx_mapping[neighbor_idx] = i
+            boxes.append(box)
+            seen_objs.add(neighbor_idx)
+    objs.extend(extend_objs)
 
     # The last object will be the special __image__ object
     objs.append(self.vocab['object_name_to_idx']['__image__'])

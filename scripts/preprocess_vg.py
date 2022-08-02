@@ -160,14 +160,17 @@ def main(args):
   with open(args.output_vocab_json, 'w') as f:
     json.dump(vocab, f)
 
-def extend_vocab_wordnet(vocab, neighbors=2):
-    extension = {'object_names': [], 'pred_names': []}
-    sources = [w + '.n.01' for w in vocab['object_idx_to_name']]
+def extend_vocab_wordnet(vocab, n_neighbors=2):
+    DEFAULT_SUFFIX = '.n.01'
+    extension = {'object_names': [], 'pred_names': [], 'names_to_synsets': {}, 'synsets_to_names': {}}
+    sources = [w + DEFAULT_SUFFIX for w in vocab['object_idx_to_name']]
+    extension['names_to_synsets'] = {w: w + DEFAULT_SUFFIX for w in vocab['object_idx_to_name']}
+    extension['synsets_to_names'] = {w + DEFAULT_SUFFIX: w for w in vocab['object_idx_to_name']}
     existing = set(sources)
     found = []
     not_found = []
     preds = set()
-    for n in range(neighbors):
+    for n in range(n_neighbors):
         for s in sources:
             neighbors = wordnet_neighbors.get(s)
             if neighbors is None:
@@ -177,6 +180,10 @@ def extend_vocab_wordnet(vocab, neighbors=2):
                     neighbors = wordnet_neighbors.get(wn_s)
                     if neighbors is None:
                         raise ValueError('synset not found')
+                    else:
+                        name = extension['synsets_to_names'][s]
+                        extension['names_to_synsets'][name] = wn_s
+                        extension['synsets_to_names'][wn_s] = name
                 except Exception:
                     not_found.append(s)
                     continue
@@ -212,6 +219,9 @@ def extend_vocab_wordnet(vocab, neighbors=2):
 
     assert all([vocab['object_name_to_idx'][name] == idx for idx, name in enumerate(vocab['object_idx_to_name'])])
     assert all([vocab['pred_name_to_idx'][name] == idx for idx, name in enumerate(vocab['pred_idx_to_name'])])
+
+    vocab['names_to_synsets'] = extension['names_to_synsets']
+    vocab['synsets_to_names'] = extension['synsets_to_names']
     return
 
 def remove_small_images(args, image_id_to_image, splits):
