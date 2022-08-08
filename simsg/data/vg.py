@@ -84,6 +84,15 @@ class SceneGraphNoPairsDataset(Dataset):
       return min(self.max_samples, num)
     return num
 
+  def add_triple(self, triples, s, p, o):
+    if s is not None and o is not None:
+      if self.clean_repeats and [s, p, o] in triples:
+        return
+      if self.predgraphs and s == o:
+        return
+      triples.append([s, p, o])
+
+
   def __getitem__(self, index):
     """
     Returns a tuple of:
@@ -177,6 +186,7 @@ class SceneGraphNoPairsDataset(Dataset):
     # Extend with WordNet objects
     seen_objs = set(objs)
     extend_objs = []
+    extend_triples = []
     for obj_idx, box in zip(objs, boxes):
       obj_name = self.vocab['object_idx_to_name'][obj_idx]
       obj_synset = self.vocab['names_to_synsets'].get(obj_name, obj_name)
@@ -189,7 +199,7 @@ class SceneGraphNoPairsDataset(Dataset):
               neighbor_name = self.vocab['synsets_to_names'][neighbor_synset]
               neighbor_idx = self.vocab['object_name_to_idx'][neighbor_name]
             except Exception:
-              pass  # further than n_neighbor
+              continue  # further than n_neighbor
           if neighbor_idx not in seen_objs:
             extend_objs.append(neighbor_idx)
             i = len(map_overlapping_obj)
@@ -197,6 +207,10 @@ class SceneGraphNoPairsDataset(Dataset):
             obj_idx_mapping[neighbor_idx] = i
             boxes.append(box)
             seen_objs.add(neighbor_idx)
+          s = obj_idx_mapping.get(obj_idx, None)
+          p = edge_idx
+          o = obj_idx_mapping.get(neighbor_idx, None)
+          self.add_triple(extend_triples, s, p, o)
     objs.extend(extend_objs)
 
     # The last object will be the special __image__ object
@@ -216,12 +230,10 @@ class SceneGraphNoPairsDataset(Dataset):
       o = self.data['relationship_objects'][index, r_idx].item()
       s = obj_idx_mapping.get(s, None)
       o = obj_idx_mapping.get(o, None)
-      if s is not None and o is not None:
-        if self.clean_repeats and [s, p, o] in triples:
-          continue
-        if self.predgraphs and s == o:
-          continue
-        triples.append([s, p, o])
+      self.add_triple(triples, s, p, o)
+
+    # Extend with WordNet triples
+    #triples.extend(extend_triples)
 
     # Add dummy __in_image__ relationships for all objects
     in_image = self.vocab['pred_name_to_idx']['__in_image__']
