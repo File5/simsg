@@ -64,6 +64,8 @@ parser.add_argument('--min_relationship_instances', default=500, type=int)
 parser.add_argument('--min_relationships_per_image', default=1, type=int)
 parser.add_argument('--max_relationships_per_image', default=30, type=int)
 
+parser.add_argument('--n_wn_neighbors', default=2, type=int)
+
 # Output
 parser.add_argument('--output_vocab_json',
     default=os.path.join(VG_DIR, 'vocab.json'))
@@ -154,7 +156,7 @@ def main(args):
     print()
 
   print('Extend vocab with WordNet neighbors')
-  extend_vocab_wordnet(vocab)
+  extend_vocab_wordnet(vocab, n_neighbors=args.n_wn_neighbors)
 
   print('Writing vocab to "%s"' % args.output_vocab_json)
   with open(args.output_vocab_json, 'w') as f:
