@@ -40,12 +40,13 @@ cd simsg
 conda create --name simsg_env python=3.7 --file requirements.txt 
 conda activate simsg_env          # activate virtual environment
 # install pytorch and cuda version as tested in our work
-conda install pytorch==1.4.0 torchvision==0.5.0 cudatoolkit=10.1 -c pytorch
+conda install pytorch==1.11.0 torchvision==0.12.0 cudatoolkit=11.3 -c pytorch
 conda install -c pytorch torchtext
-pip install torch-scatter==2.0.4 torch-sparse==0.6.1 -f https://data.pyg.org/whl/torch-1.4.0+cu101.html
+pip install torch-scatter==2.0.9 torch-sparse==0.6.13 -f https://data.pyg.org/whl/torch-1.11.0+cu113.html
 pip install torch-geometric
-conda install -c dglteam dgl-cuda10.1=0.4.3
 pip install nltk
+pip install -e git+https://github.com/File5/butd-image-captioning.git@latest-dgl#egg=butd_image_captioning  # can install own version of dgl
+conda install -c dglteam dgl-cuda11.3
 #conda install --force --no-deps -c pyg pytorch-scatter
 #conda install --no-deps -c pyg  pytorch-sparse
 #conda install --no-deps -c rusty1s  pytorch-geometric
