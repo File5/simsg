@@ -1057,37 +1057,36 @@ class GATModel(nn.Module):
         else:
             layout_boxes = boxes_gt.clone()
 
-        layout = boxes_to_layout(obj_vecs, layout_boxes, obj_to_img, H, W,
-                                     pooling=self.layout_pooling)
+        # get layout N value
+        N = obj_to_img.data.max().item() + 1
+        N2 = obj_to_img.max() + 1
+        #assert layout.size()[0] == N
+        assert N == N2
+        layout_dtype = obj_vecs.dtype
+        layout_device = obj_vecs.device
         noise_occluding = True
 
         if self.image_feats_branch:
 
-            N, C, H, W = layout.size()
             noise_shape = (N, 3, H, W)
             if noise_occluding:
-                layout_noise = torch.randn(noise_shape, dtype=layout.dtype,
-                                           device=layout.device)
+                layout_noise = torch.randn(noise_shape, dtype=layout_dtype,
+                                           device=layout_device)
             else:
-                layout_noise = torch.zeros(noise_shape, dtype=layout.dtype,
-                                           device=layout.device)
+                layout_noise = torch.zeros(noise_shape, dtype=layout_dtype,
+                                           device=layout_device)
 
             in_image[:, :3, :, :] = layout_noise * in_image[:, 3:4, :, :] + in_image[:, :3, :, :] * (
                         1 - in_image[:, 3:4, :, :])
             img_feats = self.conv_img(in_image)
 
-            layout = torch.cat([layout, img_feats], dim=1)
-
         elif self.layout_noise_dim > 0:
-            N, C, H, W = layout.size()
             noise_shape = (N, self.layout_noise_dim, H, W)
             if self.is_supervised:
                 layout_noise = self.im_to_noise_conv(imgs_src)
             else:
-                layout_noise = torch.randn(noise_shape, dtype=layout.dtype,
-                                       device=layout.device)
-
-            layout = torch.cat([layout, layout_noise], dim=1)
+                layout_noise = torch.randn(noise_shape, dtype=layout_dtype,
+                                       device=layout_device)
 
         if get_layout_boxes:
             return graph_features, num_objs, layout_boxes
