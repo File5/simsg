@@ -101,6 +101,7 @@ def build_train_dsets(args):
     'max_objects': args.max_objects_per_image,
     'use_orphaned_objects': args.vg_use_orphaned_objects,
     'include_relationships': args.include_relationships,
+    'n_neighbors': args.n_wn_neighbors,
   }
   train_dset = SceneGraphNoPairsDataset(**dset_kwargs)
   iter_per_epoch = len(train_dset) // args.batch_size

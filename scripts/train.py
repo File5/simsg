@@ -89,6 +89,8 @@ def argument_parser():
   parser.add_argument('--max_objects_per_image', default=10, type=int)
   parser.add_argument('--vg_use_orphaned_objects', default=True, type=bool_flag)
 
+  parser.add_argument('--n_wn_neighbors', default=2, type=int)
+
   # Generator options
   parser.add_argument('--mask_size', default=16, type=int) # Set this to 0 to use no masks
   parser.add_argument('--embedding_dim', default=50, type=int)

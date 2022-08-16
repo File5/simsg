@@ -40,7 +40,8 @@ class SceneGraphNoPairsDataset(Dataset):
   def __init__(self, vocab, h5_path, image_dir, image_size=(256, 256),
                normalize_images=True, max_objects=10, max_samples=None,
                include_relationships=True, use_orphaned_objects=True,
-               mode='train', clean_repeats=True, predgraphs=False):
+               mode='train', clean_repeats=True, predgraphs=False,
+               n_neighbors=2):
     super(SceneGraphNoPairsDataset, self).__init__()
 
     assert mode in ["train", "eval", "auto_withfeats", "auto_nofeats", "reposition", "remove", "replace"]
@@ -58,6 +59,8 @@ class SceneGraphNoPairsDataset(Dataset):
 
     self.evaluating = mode != 'train'
     self.predgraphs = predgraphs
+
+    self.n_neighbors = n_neighbors
 
     if self.mode == 'reposition':
       self.use_orphaned_objects = False
@@ -186,33 +189,39 @@ class SceneGraphNoPairsDataset(Dataset):
 
     # Extend with WordNet objects
     seen_objs = set(objs)
-    extend_objs = []
     extend_triples = []
-    for obj_idx, box in zip(objs, boxes):
-      obj_name = self.vocab['object_idx_to_name'][obj_idx]
-      obj_synset = self.vocab['names_to_synsets'].get(obj_name, obj_name)
-      if obj_synset in self.wordnet_neighbors:
-        for neighbor_synset, edge_idx in self.wordnet_neighbors[obj_synset]:
-          try:
-            neighbor_idx = self.vocab['object_name_to_idx'][neighbor_synset]
-          except KeyError:
+    source_objs, source_boxes = objs, boxes
+    for n in range(self.n_neighbors):
+      extend_objs = []
+      extend_boxes = []
+
+      for obj_idx, box in zip(source_objs, source_boxes):
+        obj_name = self.vocab['object_idx_to_name'][obj_idx]
+        obj_synset = self.vocab['names_to_synsets'].get(obj_name, obj_name)
+        if obj_synset in self.wordnet_neighbors:
+          for neighbor_synset, edge_idx in self.wordnet_neighbors[obj_synset]:
             try:
-              neighbor_name = self.vocab['synsets_to_names'][neighbor_synset]
-              neighbor_idx = self.vocab['object_name_to_idx'][neighbor_name]
-            except Exception:
-              continue  # further than n_neighbor
-          if neighbor_idx not in seen_objs:
-            extend_objs.append(neighbor_idx)
-            i = len(map_overlapping_obj)
-            map_overlapping_obj[i] = i
-            obj_idx_mapping[neighbor_idx] = i
-            boxes.append(box)
-            seen_objs.add(neighbor_idx)
-          s = obj_idx_mapping.get(obj_idx, None)
-          p = edge_idx
-          o = obj_idx_mapping.get(neighbor_idx, None)
-          self.add_triple(extend_triples, s, p, o)
-    objs.extend(extend_objs)
+              neighbor_idx = self.vocab['object_name_to_idx'][neighbor_synset]
+            except KeyError:
+              try:
+                neighbor_name = self.vocab['synsets_to_names'][neighbor_synset]
+                neighbor_idx = self.vocab['object_name_to_idx'][neighbor_name]
+              except Exception:
+                continue  # further than n_neighbor
+            if neighbor_idx not in seen_objs:
+              extend_objs.append(neighbor_idx)
+              i = len(map_overlapping_obj)
+              map_overlapping_obj[i] = i
+              obj_idx_mapping[neighbor_idx] = i
+              extend_boxes.append(box)
+              seen_objs.add(neighbor_idx)
+            s = obj_idx_mapping.get(obj_idx, None)
+            p = edge_idx
+            o = obj_idx_mapping.get(neighbor_idx, None)
+            self.add_triple(extend_triples, s, p, o)
+      objs.extend(extend_objs)
+      boxes.extend(extend_boxes)
+      source_objs, source_boxes = extend_objs, extend_boxes
 
     # The last object will be the special __image__ object
     objs.append(self.vocab['object_name_to_idx']['__image__'])
@@ -234,7 +243,7 @@ class SceneGraphNoPairsDataset(Dataset):
       self.add_triple(triples, s, p, o)
 
     # Extend with WordNet triples
-    #triples.extend(extend_triples)
+    triples.extend(extend_triples)
 
     # Add dummy __in_image__ relationships for all objects
     in_image = self.vocab['pred_name_to_idx']['__in_image__']
