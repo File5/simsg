@@ -75,8 +75,6 @@ parser.add_argument('--output_h5_dir', default=VG_DIR)
 from simsg.data.wordnet import WordNet18
 wordnet = WordNet18("datasets/wordnet18")
 import nltk
-nltk.download('wordnet')
-from nltk.corpus import wordnet as wordnet_corpus
 def build_wordnet_neighbors_dict(wordnet):
     result = {}
     data = wordnet.data
@@ -155,14 +153,17 @@ def main(args):
         path_dset[i] = p
     print()
 
+  nltk.download('wordnet')
+  from nltk.corpus import wordnet as wordnet_corpus
+
   print('Extend vocab with WordNet neighbors')
-  extend_vocab_wordnet(vocab, n_neighbors=args.n_wn_neighbors)
+  extend_vocab_wordnet(wordnet_corpus, vocab, n_neighbors=args.n_wn_neighbors)
 
   print('Writing vocab to "%s"' % args.output_vocab_json)
   with open(args.output_vocab_json, 'w') as f:
     json.dump(vocab, f)
 
-def extend_vocab_wordnet(vocab, n_neighbors=2):
+def extend_vocab_wordnet(wordnet_corpus, vocab, n_neighbors=2):
     DEFAULT_SUFFIX = '.n.01'
     extension = {'object_names': [], 'pred_names': [], 'names_to_synsets': {}, 'synsets_to_names': {}}
     sources = [w + DEFAULT_SUFFIX for w in vocab['object_idx_to_name']]

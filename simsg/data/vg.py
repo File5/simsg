@@ -35,6 +35,8 @@ from scripts.preprocess_vg import build_wordnet_neighbors_dict
 
 
 class SceneGraphNoPairsDataset(Dataset):
+  wordnet = WordNet18("datasets/wordnet18")
+
   def __init__(self, vocab, h5_path, image_dir, image_size=(256, 256),
                normalize_images=True, max_objects=10, max_samples=None,
                include_relationships=True, use_orphaned_objects=True,
@@ -75,7 +77,6 @@ class SceneGraphNoPairsDataset(Dataset):
         else:
           self.data[k] = torch.IntTensor(np.asarray(v))
 
-    self.wordnet = WordNet18("datasets/wordnet18")
     self.wordnet_neighbors = build_wordnet_neighbors_dict(self.wordnet)
 
   def __len__(self):
