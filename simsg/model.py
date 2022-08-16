@@ -739,6 +739,8 @@ def combine_boxes(gt, pred):
     return new_box
 
 
+import re
+
 from dgl.nn.pytorch import GATConv
 
 from torchtext.vocab import GloVe
@@ -898,20 +900,31 @@ class GATModel(nn.Module):
                 nn.ReLU()
             )
 
+    def is_synset_name(self, name):
+        if len(name) >= 5:
+            return name[-5] == '.' and name[-3] == '.'
+        else:
+            return False
+
     def load_glove_embeddings(self, names):
         weights = []
         not_found = []
         for name in names:
+            if self.is_synset_name(name):
+                name = name[:-5]
             if name in glove.stoi:
                 weights.append(glove[name])
             elif name == '__image__':
                 weights.append(glove['background'])
             else:
-                words = name.strip('_').split(' ')
+                words = re.split(r' |_|-', name.strip('_'))
+                for w in words:
+                    if w not in glove.stoi:
+                        not_found.append(name)
+                        break
                 result = functools.reduce(lambda x, y: x + y, [glove[w] for w in words])
                 result = result / len(words)
                 weights.append(result)
-                not_found.append(name)
         weights = torch.stack(weights)
         if not_found:
             import warnings
