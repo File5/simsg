@@ -860,10 +860,11 @@ class GATModel(nn.Module):
             Concat(),
             GATConv(64 * 4, 64, 4),
             Concat(),
-            GATConv(64 * 4, num_objs, 6),
+            GATConv(64 * 4, gat_input_dims, 6),
             Avg(),
         ]
         self.gat = DGLSequential(*gat_layers)
+        self.classification_layer = torch.nn.Linear(gat_input_dims, num_objs)
 
         self.hidden_obj_embedding = torch.normal(mean=0.0, std=1.0, size=(embedding_dim, ))
 
@@ -1048,6 +1049,9 @@ class GATModel(nn.Module):
             obj_vecs, pred_vecs = self.graph_feat_pool(obj_vecs, pred_vecs, edges)
         graph_features = self.forward_gat(obj_vecs, pred_vecs, edges)
 
+        # Classification
+        classification_scores = self.classification_layer(graph_features)
+
         H, W = self.image_size
 
         if self.is_baseline or self.is_supervised:
@@ -1102,9 +1106,9 @@ class GATModel(nn.Module):
                                        device=layout_device)
 
         if get_layout_boxes:
-            return graph_features, num_objs, layout_boxes
+            return graph_features, num_objs, classification_scores, layout_boxes
         else:
-            return graph_features, num_objs
+            return graph_features, num_objs, classification_scores
 
     def forward_gat(self, obj_vecs, pred_vecs, edges):
         dtype, device = obj_vecs.dtype, obj_vecs.device

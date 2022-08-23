@@ -252,7 +252,8 @@ def check_model(args, t, loader, model):
   all_losses = defaultdict(list)
   total_correct = 0
   total_objs = 0
-  loss = torch.nn.CrossEntropyLoss()
+  loss = torch.nn.MSELoss()
+  classification_loss = torch.nn.CrossEntropyLoss()
   with torch.no_grad():
     for batch in loader:
       batch = [tensor.cuda() for tensor in batch]
@@ -269,17 +270,21 @@ def check_model(args, t, loader, model):
 
       model_out = model(objs, triples, obj_to_img, boxes_gt=boxes, masks_gt=model_masks,
                         src_image=imgs_in, imgs_src=imgs_src)
-      nodes_pred, num_objs = model_out
-      nodes_pred = nodes_pred[:num_objs]
+      nodes_vecs_pred, num_objs, classification_scores = model_out
+      nodes_vecs_pred = nodes_vecs_pred[:num_objs]
+      classification_scores = classification_scores[:num_objs]
 
-      node_classes_preds = torch.argmax(nodes_pred, dim=1)
+      node_classes_preds = torch.argmax(classification_scores, dim=1)
       correct = torch.sum(node_classes_preds == objs).item()
       total = num_objs
       total_correct += correct
       total_objs += total
 
       skip_pixel_loss = False
-      total_loss = loss(nodes_pred, objs)
+      objs_gt_vecs = model.obj_embeddings(objs)
+      rec_loss = loss(nodes_vecs_pred, objs_gt_vecs)
+      cl_loss = classification_loss(classification_scores, objs)
+      total_loss = rec_loss + cl_loss
       losses = {'total_loss': total_loss}
 
       for loss_name, loss_val in losses.items():
@@ -324,7 +329,8 @@ def main(args):
   optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=args.learning_rate)
 
-  loss = torch.nn.CrossEntropyLoss()
+  loss = torch.nn.MSELoss()
+  classification_loss = torch.nn.CrossEntropyLoss()
 
   restore_path = None
   if args.checkpoint_start_from is not None:
@@ -381,15 +387,20 @@ def main(args):
         model_out = model(objs, triples, obj_to_img,
                           boxes_gt=model_boxes, masks_gt=model_masks, src_image=imgs_in, imgs_src=imgs_src, t=t,
                           hide_obj_mask=hide_obj_mask)
-        nodes_pred, num_objs = model_out
+        nodes_pred, num_objs, classification_scores = model_out
         nodes_pred = nodes_pred[:num_objs]
+        classification_scores = classification_scores[:num_objs]
 
       with timeit('loss', args.timing):
         # Skip the pixel loss if not using GT boxes
         skip_pixel_loss = (model_boxes is None)
         losses = {}
         # Loss over all predictions
-        total_loss = loss(nodes_pred, objs)
+        objs_gt_vecs = model.obj_embeddings(objs)
+        rec_loss = loss(nodes_pred, objs_gt_vecs)
+        # Classification
+        cl_loss = classification_loss(classification_scores, objs)
+        total_loss = rec_loss + cl_loss
 
       losses['total_loss'] = total_loss.item()
       if not math.isfinite(losses['total_loss']):
