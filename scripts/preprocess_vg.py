@@ -72,8 +72,13 @@ parser.add_argument('--output_vocab_json',
 parser.add_argument('--output_h5_dir', default=VG_DIR)
 
 
+import re
+
 from simsg.data.wordnet import WordNet18
 wordnet = WordNet18("datasets/wordnet18")
+from torchtext.vocab import GloVe
+glove = GloVe("6B", dim=50)
+
 import nltk
 def build_wordnet_neighbors_dict(wordnet):
     result = {}
@@ -172,6 +177,18 @@ def extend_vocab_wordnet(wordnet_corpus, vocab, n_neighbors=2):
     existing = set(sources)
     found = []
     not_found = []
+    without_glove = []
+    def has_glove(s):
+      name = s[:-5]
+      glove_found = True
+      if name not in glove.stoi:
+        words = re.split(r' |_|-', name.strip('_'))
+        for w in words:
+          if w not in glove.stoi:
+            without_glove.append(s)
+            glove_found = False
+            break  # for w in words
+      return glove_found
     preds = set()
     for n in range(n_neighbors):
         for s in sources:
@@ -194,6 +211,7 @@ def extend_vocab_wordnet(wordnet_corpus, vocab, n_neighbors=2):
             preds.update(map(lambda x: x[1], neighbors))
             neighbors = list(map(lambda x: x[0], neighbors))
             neighbors = {x for x in neighbors if x not in existing}
+            neighbors = {x for x in neighbors if has_glove(x)}
             found.extend(neighbors)
             existing.update(neighbors)
         #assert len(found) == len(set(found))
@@ -204,6 +222,9 @@ def extend_vocab_wordnet(wordnet_corpus, vocab, n_neighbors=2):
     if len(not_found) > 0:
         import warnings
         warnings.warn("Could not find neighbors for the following names (count = {}): {}".format(len(not_found), not_found))
+    if len(without_glove) > 0:
+        import warnings
+        warnings.warn("Could not find GloVe embeddings for the following names (count = {}): {}".format(len(without_glove), without_glove))
     #assert len(extention) == len(set(extention))
     pred_names = [wordnet.id2edge[i] for i in preds]
     extension['pred_names'].extend(pred_names)
