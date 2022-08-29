@@ -69,7 +69,7 @@ def argument_parser():
   # Optimization hyperparameters
   parser.add_argument('--batch_size', default=32, type=int)
   parser.add_argument('--num_iterations', default=500, type=int)
-  parser.add_argument('--learning_rate', default=2e-4, type=float)
+  parser.add_argument('--learning_rate', default=1e-3, type=float)
 
   # Dataset options
   parser.add_argument('--image_size', default='64,64', type=int_tuple)
@@ -285,7 +285,11 @@ def check_model(args, t, loader, model):
       rec_loss = loss(nodes_vecs_pred, objs_gt_vecs)
       cl_loss = classification_loss(classification_scores, objs)
       total_loss = rec_loss + cl_loss
-      losses = {'total_loss': total_loss}
+      losses = {
+        'total_loss': total_loss,
+        'rec_loss': rec_loss,
+        'cl_loss': cl_loss
+      }
 
       for loss_name, loss_val in losses.items():
         all_losses[loss_name].append(loss_val)
@@ -403,6 +407,8 @@ def main(args):
         total_loss = rec_loss + cl_loss
 
       losses['total_loss'] = total_loss.item()
+      losses['rec_loss'] = rec_loss.item()
+      losses['cl_loss'] = cl_loss.item()
       if not math.isfinite(losses['total_loss']):
         print('WARNING: Got loss = NaN, not backpropping')
         continue
@@ -447,9 +453,9 @@ def main(args):
                               '%s_model.pt' % (args.checkpoint_name))
 
         print('Saving checkpoint to ', checkpoint_path_latest)
-        #torch.save(checkpoint, checkpoint_path_latest)
+        torch.save(checkpoint, checkpoint_path_latest)
         if t % 10000 == 0 and t >= 100000:
-          pass#torch.save(checkpoint, checkpoint_path_step)
+          torch.save(checkpoint, checkpoint_path_step)
 
 
 if __name__ == '__main__':
