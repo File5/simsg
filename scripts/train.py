@@ -69,7 +69,7 @@ def argument_parser():
   # Optimization hyperparameters
   parser.add_argument('--batch_size', default=32, type=int)
   parser.add_argument('--num_iterations', default=500, type=int)
-  parser.add_argument('--learning_rate', default=1e-3, type=float)
+  parser.add_argument('--learning_rate', default=2e-3, type=float)
 
   # Dataset options
   parser.add_argument('--image_size', default='64,64', type=int_tuple)
@@ -134,9 +134,9 @@ def argument_parser():
   parser.add_argument('--d_img_weight', default=1.0, type=float) # multiplied by d_loss_weight
 
   # Output options
-  parser.add_argument('--print_every', default=5, type=int)
+  parser.add_argument('--print_every', default=50, type=int)
   parser.add_argument('--timing', default=False, type=bool_flag)
-  parser.add_argument('--checkpoint_every', default=50, type=int)
+  parser.add_argument('--checkpoint_every', default=500, type=int)
   parser.add_argument('--eval_mode_after', default=1000000, type=int)
   parser.add_argument('--output_dir', default=os.getcwd())
   parser.add_argument('--checkpoint_name', default='checkpoint')
@@ -244,6 +244,10 @@ def build_img_discriminator(args, vocab):
   return discriminator, d_kwargs
 
 
+def calc_total_loss(rec_loss, cl_loss):
+  return rec_loss * 9 / 10 + cl_loss / 10
+
+
 def check_model(args, t, loader, model):
 
   # TODO: add hidden nodes
@@ -284,7 +288,7 @@ def check_model(args, t, loader, model):
       objs_gt_vecs = model.obj_embeddings(objs)
       rec_loss = loss(nodes_vecs_pred, objs_gt_vecs)
       cl_loss = classification_loss(classification_scores, objs)
-      total_loss = rec_loss + cl_loss
+      total_loss = calc_total_loss(rec_loss, cl_loss)
       losses = {
         'total_loss': total_loss,
         'rec_loss': rec_loss,
@@ -404,7 +408,7 @@ def main(args):
         rec_loss = loss(nodes_pred, objs_gt_vecs)
         # Classification
         cl_loss = classification_loss(classification_scores, objs)
-        total_loss = rec_loss + cl_loss
+        total_loss = calc_total_loss(rec_loss, cl_loss)
 
       losses['total_loss'] = total_loss.item()
       losses['rec_loss'] = rec_loss.item()
