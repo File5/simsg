@@ -72,21 +72,17 @@ class HandcraftedSceneGraphDataset(Dataset):
       transform.append(imagenet_preprocess())
     self.transform = T.Compose(transform)
 
-    self.data = {}
-    with h5py.File(h5_path, 'r') as f:
-      for k, v in f.items():
-        if k == 'image_paths':
-          self.image_paths = list(v)
-        else:
-          self.data[k] = torch.IntTensor(np.asarray(v))
+    self.data = [
+      [  # Graph 1
+        ['person', 'holding', 'plate'],
+        ['food', 'in', 'plate'],
+      ],
+    ]
 
     self.wordnet_neighbors = build_wordnet_neighbors_dict(self.wordnet)
 
   def __len__(self):
-    num = self.data['object_names'].size(0)
-    if self.max_samples is not None:
-      return min(self.max_samples, num)
-    return num
+    return len(self.data)
 
   def add_triple(self, triples, s, p, o):
     if s is not None and o is not None:
@@ -107,48 +103,17 @@ class HandcraftedSceneGraphDataset(Dataset):
     - triples: LongTensor of shape (num_triples, 3) where triples[t] = [i, p, j]
       means that (objs[i], p, objs[j]) is a triple.
     """
-    img_path = os.path.join(self.image_dir, self.image_paths[index])
-
-    # use for the mix strings and bytes error
-    #img_path = os.path.join(self.image_dir, self.image_paths[index].decode("utf-8"))
-
-    with open(img_path, 'rb') as f:
-      with PIL.Image.open(f) as image:
-        WW, HH = image.size
-        #print(WW, HH)
-        image = self.transform(image.convert('RGB'))
-
     H, W = self.image_size
 
-    # Figure out which objects appear in relationships and which don't
-    obj_idxs_with_rels = set()
-    obj_idxs_without_rels = set(range(self.data['objects_per_image'][index].item()))
-    for r_idx in range(self.data['relationships_per_image'][index]):
-      s = self.data['relationship_subjects'][index, r_idx].item()
-      o = self.data['relationship_objects'][index, r_idx].item()
-      obj_idxs_with_rels.add(s)
-      obj_idxs_with_rels.add(o)
-      obj_idxs_without_rels.discard(s)
-      obj_idxs_without_rels.discard(o)
-
-    obj_idxs = list(obj_idxs_with_rels)
-    obj_idxs_without_rels = list(obj_idxs_without_rels)
-    if len(obj_idxs) > self.max_objects - 1:
-      if self.evaluating:
-        obj_idxs = obj_idxs[:self.max_objects]
-      else:
-        obj_idxs = random.sample(obj_idxs, self.max_objects)
-    if len(obj_idxs) < self.max_objects - 1 and self.use_orphaned_objects:
-      num_to_add = self.max_objects - 1 - len(obj_idxs)
-      num_to_add = min(num_to_add, len(obj_idxs_without_rels))
-      if self.evaluating:
-        obj_idxs += obj_idxs_without_rels[:num_to_add]
-      else:
-        obj_idxs += random.sample(obj_idxs_without_rels, num_to_add)
-    if len(obj_idxs) == 0 and not self.use_orphaned_objects:
-      # avoid empty list of objects
-      obj_idxs += obj_idxs_without_rels[:1]
     map_overlapping_obj = {}
+    graph_data = self.data[index]
+    obj_names = []
+    for s, p, o in graph_data:
+      if s not in obj_names:
+        obj_names.append(s)
+      if o not in obj_names:
+        obj_names.append(o)
+    obj_idxs = [self.vocab['object_name_to_idx'][n] for n in obj_names]
 
     objs = []
     boxes = []
@@ -156,34 +121,13 @@ class HandcraftedSceneGraphDataset(Dataset):
     obj_idx_mapping = {}
     counter = 0
     for i, obj_idx in enumerate(obj_idxs):
+      curr_obj = obj_idx
+      curr_box = torch.FloatTensor([0, 0, 1, 1])
 
-      curr_obj = self.data['object_names'][index, obj_idx].item()
-      x, y, w, h = self.data['object_boxes'][index, obj_idx].tolist()
-
-      x0 = float(x) / WW
-      y0 = float(y) / HH
-      if self.predgraphs:
-        x1 = float(w) / WW
-        y1 = float(h) / HH
-      else:
-        x1 = float(x + w) / WW
-        y1 = float(y + h) / HH
-
-      curr_box = torch.FloatTensor([x0, y0, x1, y1])
-
-      found_overlap = False
-      if self.predgraphs:
-        for prev_idx in range(counter):
-          if overlapping_nodes(objs[prev_idx], curr_obj, boxes[prev_idx], curr_box):
-            map_overlapping_obj[i] = prev_idx
-            found_overlap = True
-            break
-      if not found_overlap:
-
-        objs.append(curr_obj)
-        boxes.append(curr_box)
-        map_overlapping_obj[i] = counter
-        counter += 1
+      objs.append(curr_obj)
+      boxes.append(curr_box)
+      map_overlapping_obj[i] = counter
+      counter += 1
 
       obj_idx_mapping[obj_idx] = map_overlapping_obj[i]
 
@@ -232,6 +176,10 @@ class HandcraftedSceneGraphDataset(Dataset):
     num_objs = counter + 1
 
     triples = []
+    triples = [
+      [0, self.vocab['pred_name_to_idx']['holding'], 1],
+      [2, self.vocab['pred_name_to_idx']['in'], 1],
+    ]
     for r_idx in range(self.data['relationships_per_image'][index].item()):
       if not self.include_relationships:
         break
@@ -251,6 +199,7 @@ class HandcraftedSceneGraphDataset(Dataset):
       triples.append([i, in_image, num_objs - 1])
 
     triples = torch.LongTensor(triples)
+    image = None
     return image, objs, boxes, triples
 
 

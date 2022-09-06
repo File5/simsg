@@ -1,3 +1,4 @@
+from simsg.data.handcrafted import HandcraftedSceneGraphDataset
 from simsg.data.vg import SceneGraphNoPairsDataset, collate_fn_nopairs
 from simsg.data.clevr import SceneGraphWithPairsDataset, collate_fn_withpairs
 
@@ -72,6 +73,20 @@ def build_eval_loader(args, checkpoint, vocab_t=None, no_gt=False):
 
   if args.dataset == 'vg' or (no_gt and args.dataset == 'clevr'):
     dset = build_dset_nopairs(args, checkpoint)
+    collate_fn = collate_fn_nopairs
+  elif args.dataset == 'handcrafted':
+    vocab = checkpoint['model_kwargs']['vocab']
+    dset_kwargs = {
+      'vocab': vocab,
+      'h5_path': args.data_h5,
+      'image_dir': args.data_image_dir,
+      'image_size': args.image_size,
+      'max_objects': checkpoint['args']['max_objects_per_image'],
+      'use_orphaned_objects': checkpoint['args']['vg_use_orphaned_objects'],
+      'mode': args.mode,
+      'predgraphs': args.predgraphs
+    }
+    dset = HandcraftedSceneGraphDataset(**dset_kwargs)
     collate_fn = collate_fn_nopairs
   elif args.dataset == 'clevr':
     dset = build_dset_withpairs(args, checkpoint, vocab_t)
