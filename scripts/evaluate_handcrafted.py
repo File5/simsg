@@ -97,7 +97,8 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
   cos_sim = torch.nn.CosineSimilarity(dim=-1)
 
-  class_embeddings = [glove[x] for x in ('chef', 'doctor', 'engineer', 'farmer', 'firefighter', 'judge', 'mechanic', 'pilot', 'police', 'waiter')]
+  classes = ['chef', 'doctor', 'engineer', 'farmer', 'firefighter', 'judge', 'mechanic', 'pilot', 'police', 'waiter']
+  class_embeddings = [glove[x] for x in classes]
   class_embeddings = [x.cuda() for x in class_embeddings]
 
   for batch in loader:
@@ -121,7 +122,8 @@ def run_model(args, checkpoint, output_dir, loader=None):
     print(node_classes_preds)
     profession_node_emb = nodes_pred[-1]
     classes_dists = [cos_sim(profession_node_emb, c) for c in class_embeddings]
-    print("Prediction for hidden node: ", torch.argmax(torch.tensor(classes_dists)).item())
+    profession_pred = torch.argmax(torch.tensor(classes_dists)).item()
+    print(f"Prediction for hidden node: {classes[profession_pred]} ({profession_pred})")
     print([x.item() for x in classes_dists])
   print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
 
