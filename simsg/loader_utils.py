@@ -1,4 +1,4 @@
-from simsg.data.handcrafted import HandcraftedSceneGraphDataset
+from simsg.data.handcrafted import HandcraftedSceneGraphDataset, collate_fn_nopairs_noimgs
 from simsg.data.vg import SceneGraphNoPairsDataset, collate_fn_nopairs
 from simsg.data.clevr import SceneGraphWithPairsDataset, collate_fn_withpairs
 
@@ -87,7 +87,7 @@ def build_eval_loader(args, checkpoint, vocab_t=None, no_gt=False):
       'predgraphs': args.predgraphs
     }
     dset = HandcraftedSceneGraphDataset(**dset_kwargs)
-    collate_fn = collate_fn_nopairs
+    collate_fn = collate_fn_nopairs_noimgs
   elif args.dataset == 'clevr':
     dset = build_dset_withpairs(args, checkpoint, vocab_t)
     collate_fn = collate_fn_withpairs

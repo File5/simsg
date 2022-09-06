@@ -993,7 +993,9 @@ class GATModel(nn.Module):
 
         evaluating = mode != 'train'
 
-        in_image = src_image.clone()
+        in_image = None
+        if src_image is not None:
+            in_image = src_image.clone()
         num_objs = objs.size(0)
         s, p, o = triples.chunk(3, dim=1)  # All have shape (num_triples, 1)
         s, p, o = [x.squeeze(1) for x in [s, p, o]]  # Now have shape (num_triples,)
@@ -1009,7 +1011,7 @@ class GATModel(nn.Module):
         if combine_gt_pred_box_idx is None:
             combine_gt_pred_box_idx = torch.zeros_like(objs)
 
-        if not (self.is_baseline or self.is_supervised):
+        if in_image is not None and not (self.is_baseline or self.is_supervised):
             box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
             box_keep, feats_keep = self.prepare_keep_idx(evaluating, box_ones, in_image.size(0), obj_to_img,
                                                          keep_box_idx, keep_feat_idx)
@@ -1054,7 +1056,7 @@ class GATModel(nn.Module):
 
         H, W = self.image_size
 
-        if self.is_baseline or self.is_supervised:
+        if in_image is not None and (self.is_baseline or self.is_supervised):
 
             layout_boxes = boxes_gt
             box_ones = torch.ones([num_objs, 1], dtype=boxes_gt.dtype, device=boxes_gt.device)
@@ -1072,7 +1074,8 @@ class GATModel(nn.Module):
             generated = None
 
         else:
-            layout_boxes = boxes_gt.clone()
+            if get_layout_boxes:
+                layout_boxes = boxes_gt.clone()
 
         # get layout N value
         N = obj_to_img.data.max().item() + 1
@@ -1083,7 +1086,7 @@ class GATModel(nn.Module):
         layout_device = obj_vecs.device
         noise_occluding = True
 
-        if self.image_feats_branch:
+        if in_image is not None and self.image_feats_branch:
 
             noise_shape = (N, 3, H, W)
             if noise_occluding:

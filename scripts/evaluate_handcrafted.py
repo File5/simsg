@@ -89,6 +89,8 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
   assert args.mode in ['auto_withfeats', 'auto_nofeats', 'reposition', 'replace', 'remove']
 
+  total_correct = 0
+  total_objs = 0
   for batch in loader:
 
     imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in = [x.cuda() for x in batch]
@@ -99,7 +101,12 @@ def run_model(args, checkpoint, output_dir, loader=None):
     nodes_pred = nodes_pred[:num_objs]
     classification_scores = classification_scores[:num_objs]
     node_classes_preds = torch.argmax(classification_scores, dim=1)
+    correct = torch.sum(node_classes_preds == objs).item()
+    total = num_objs
+    total_correct += correct
+    total_objs += total
     print(node_classes_preds)
+  print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
 
 
 def main(args):
