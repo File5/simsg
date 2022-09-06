@@ -176,16 +176,10 @@ class HandcraftedSceneGraphDataset(Dataset):
     num_objs = counter + 1
 
     triples = []
-    triples = [
-      [0, self.vocab['pred_name_to_idx']['holding'], 1],
-      [2, self.vocab['pred_name_to_idx']['in'], 1],
-    ]
-    for r_idx in range(self.data['relationships_per_image'][index].item()):
-      if not self.include_relationships:
-        break
-      s = self.data['relationship_subjects'][index, r_idx].item()
-      p = self.data['relationship_predicates'][index, r_idx].item()
-      o = self.data['relationship_objects'][index, r_idx].item()
+    for s_name, p_name, o_name in graph_data:
+      s = self.vocab['object_name_to_idx'][s_name]
+      p = self.vocab['pred_name_to_idx'][p_name]
+      o = self.vocab['object_name_to_idx'][o_name]
       s = obj_idx_mapping.get(s, None)
       o = obj_idx_mapping.get(o, None)
       self.add_triple(triples, s, p, o)
