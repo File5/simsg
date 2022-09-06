@@ -26,9 +26,12 @@ import torch
 from imageio import imsave
 
 from simsg.model import SIMSGModel
+from simsg.model import glove
 from simsg.model import GATModel
 from simsg.utils import int_tuple, bool_flag
 from simsg.vis import draw_scene_graph
+
+from simsg.data.handcrafted import add_person_is_hidden
 
 import cv2
 import numpy as np
@@ -91,11 +94,21 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
   total_correct = 0
   total_objs = 0
+
+  cos_sim = torch.nn.CosineSimilarity(dim=-1)
+
+  class_embeddings = [glove[x] for x in ('chef', 'doctor', 'engineer', 'farmer', 'firefighter', 'judge', 'mechanic', 'pilot', 'police', 'waiter')]
+  class_embeddings = [x.cuda() for x in class_embeddings]
+
   for batch in loader:
 
-    imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in = [x.cuda() for x in batch]
+    imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in, hide_obj_mask = [x.cuda() for x in batch]
+    # objs, boxes, triples, hide_obj_mask = add_person_is_hidden(loader.dataset, objs, boxes, triples)
+    # imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in = [
+    #   x.cuda() for x in (imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in)
+    # ]
 
-    model_out = model(objs, triples)
+    model_out = model(objs, triples, hide_obj_mask=hide_obj_mask)
 
     nodes_pred, num_objs, classification_scores = model_out
     nodes_pred = nodes_pred[:num_objs]
@@ -106,6 +119,10 @@ def run_model(args, checkpoint, output_dir, loader=None):
     total_correct += correct
     total_objs += total
     print(node_classes_preds)
+    profession_node_emb = nodes_pred[-1]
+    classes_dists = [cos_sim(profession_node_emb, c) for c in class_embeddings]
+    print("Prediction for hidden node: ", torch.argmax(torch.tensor(classes_dists)).item())
+    print([x.item() for x in classes_dists])
   print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
 
 

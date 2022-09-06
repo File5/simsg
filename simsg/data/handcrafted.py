@@ -171,8 +171,6 @@ class HandcraftedSceneGraphDataset(Dataset):
     objs.append(self.vocab['object_name_to_idx']['__image__'])
     boxes.append(torch.FloatTensor([0, 0, 1, 1]))
 
-    boxes = torch.stack(boxes)
-    objs = torch.LongTensor(objs)
     num_objs = counter + 1
 
     triples = []
@@ -192,9 +190,38 @@ class HandcraftedSceneGraphDataset(Dataset):
     for i in range(num_objs - 1):
       triples.append([i, in_image, num_objs - 1])
 
+    _, _, _, hide_obj_mask = add_person_is_hidden(self, objs, boxes, triples)
+    objs = torch.LongTensor(objs)
+    boxes = torch.stack(boxes)
     triples = torch.LongTensor(triples)
     image = None
-    return image, objs, boxes, triples
+    return image, objs, boxes, triples, hide_obj_mask
+
+
+def find_in_tensor(tensor, value):
+  for i, v in enumerate(tensor):
+    if v == value:
+      return i
+
+
+def add_person_is_hidden(dataset, objs, boxes, triples):
+  person_idx = find_in_tensor(objs, dataset.vocab['object_name_to_idx']['person'])
+  o = person_idx
+  p = dataset.vocab['pred_name_to_idx']['_instance_hyponym']
+  #objs = torch.cat([objs, torch.tensor([0])])
+  objs.append(0)
+  boxes.append(boxes[person_idx])
+  s = len(objs) - 1  #dataset.vocab['object_name_to_idx']['profession']
+  # o_idx = find_in_tensor(objs, o)
+  # if o_idx is None:
+  #   objs.append(o)
+  #   boxes.append(boxes[person_idx])
+  #   o_idx = len(objs) - 1
+  dataset.add_triple(triples, s, p, o)
+  hide_obj_mask = torch.zeros(len(objs), dtype=torch.uint8)
+  hide_obj_mask[s] = 1
+  hide_obj_mask = hide_obj_mask > 0
+  return objs, boxes, triples, hide_obj_mask
 
 
 def collate_fn_nopairs_noimgs(batch):
@@ -221,13 +248,16 @@ def collate_fn_nopairs_noimgs(batch):
 
   obj_offset = 0
 
-  for i, (img, objs, boxes, triples) in enumerate(batch):
+  all_hide_obj_masks = []
+
+  for i, (img, objs, boxes, triples, hide_obj_mask) in enumerate(batch):
 
     #all_imgs.append(img[None])
     num_objs, num_triples = objs.size(0), triples.size(0)
 
     all_objs.append(objs)
     all_boxes.append(boxes)
+    all_hide_obj_masks.append(hide_obj_mask)
     triples = triples.clone()
 
     triples[:, 0] += obj_offset
@@ -253,12 +283,14 @@ def collate_fn_nopairs_noimgs(batch):
   all_imgs = torch.tensor([])
   all_objs = torch.cat(all_objs)
   all_boxes = torch.cat(all_boxes)
+  all_hide_obj_masks = torch.cat(all_hide_obj_masks)
   all_triples = torch.cat(all_triples)
   all_obj_to_img = torch.cat(all_obj_to_img)
   all_triple_to_img = torch.cat(all_triple_to_img)
 
   return all_imgs, all_objs, all_boxes, all_triples, \
-         all_obj_to_img, all_triple_to_img, all_imgs_masked
+         all_obj_to_img, all_triple_to_img, all_imgs_masked, \
+         all_hide_obj_masks
 
 
 from simsg.model import get_left_right_top_bottom
