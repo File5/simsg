@@ -17,6 +17,18 @@
             "justMyCode": false
         },
         {
+            "name": "eval_handcrafted",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/evaluate_handcrafted.py",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:512"
+            },
+            "justMyCode": false
+        },
+        {
             "name": "preprocess_vg",
             "type": "python",
             "request": "launch",

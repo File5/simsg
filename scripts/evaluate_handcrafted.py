@@ -103,6 +103,8 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
   for batch in loader:
 
+    imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in, hide_obj_mask, gt_labels = batch
+    batch = [imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in, hide_obj_mask]
     imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in, hide_obj_mask = [x.cuda() for x in batch]
     # objs, boxes, triples, hide_obj_mask = add_person_is_hidden(loader.dataset, objs, boxes, triples)
     # imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in = [
@@ -124,6 +126,7 @@ def run_model(args, checkpoint, output_dir, loader=None):
     classes_dists = [cos_sim(profession_node_emb, c) for c in class_embeddings]
     profession_pred = torch.argmax(torch.tensor(classes_dists)).item()
     print(f"Prediction for hidden node: {classes[profession_pred]} ({profession_pred})")
+    print(f"Ground truth: {gt_labels[0]}")
     print([x.item() for x in classes_dists])
   print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
 

@@ -73,11 +73,80 @@ class HandcraftedSceneGraphDataset(Dataset):
     self.transform = T.Compose(transform)
 
     self.data = [
-      [  # Graph 1
+      [  # Graph 1 (chef)
+        ['pot', 'on', 'cooker.n.01'],
+        ['board', 'on', 'table'],
+        ['knife.n.01', 'on', 'board'],
+        ['food', 'on', 'board'],
+        ['person', 'behind', 'table'],
+      ],
+      [  # Graph 2 (doctor)
+        ['patient.n.01', 'laying on', 'bed'],
+        ['person', 'near', 'patient.n.01'],
+        ['person', 'wears', 'coat'],
+        #['person', 'wears', 'mask'],
+        ['person', 'wears', 'glove'],
+      ],
+      [  # Graph 3 (engineer)
+        ['person', 'wears', 'helmet'],
+        #['person', 'wears', 'vest'],
+        ['site.n.01', 'behind', 'person'],
+      ],
+      [  # Graph 4 (farmer)
+        ['person', 'holding', 'grass'],
+        ['garden.n.03', 'behind', 'person'],
+        #['person', 'holding', 'hoe'],
+        ['grass', 'on', 'land.n.04'],
+        ['land.n.04', 'behind', 'person'],
+      ],
+      [  # Graph 5 (firefighter)
+        ['person', 'wears', 'helmet'],
+        ['person', 'wears', 'coat'],
+        ['person', 'wears', 'glove'],
+        ['truck', 'behind', 'person'],
+        #['axe', 'on', 'truck'],
+        ['fire_extinguisher.n.01', 'behind', 'person'],
+      ],
+      [  # Graph 6 (judge)
+        ['person', 'wears', 'coat'],
+        ['table', 'in front of', 'person'],
+        ['flag', 'behind', 'person'],
+        ['book', 'on', 'table'],
+        ['person', 'holding', 'hammer.n.02'],
+      ],
+      [  # Graph 7 (mechanic)
+        ['person', 'holding', 'wrench.n.03'],
+        ['car', 'behind', 'person'],
+        ['wheel', 'on', 'car'],
+        ['wheel', 'on', 'ground'],
+      ],
+      [  # Graph 8 (pilot)
+        ['person', 'in', 'cockpit.n.03'],
+        ['person', 'wears', 'shirt'],
+        #['person', 'wears', 'pants'],
+        ['strap.n.01', 'on', 'shirt'],
+        ['window', 'behind', 'person'],
+      ],
+      [  # Graph 9 (police)
+        ['person', 'wears', 'helmet'],
+        ['person', 'wears', 'bulletproof_vest.n.01'],
+        #['person', 'wears', 'pants'],
+        ['person', 'holding', 'pistol.n.01'],
+        ['car', 'behind', 'person'],
+      ],
+      [  # Graph 10 (waiter)
         ['person', 'holding', 'plate'],
+        ['person', 'wears', 'shirt'],
+        #['person', 'wears', 'pants'],
+        #['person', 'wears', 'vest'],
+        ['person', 'wears', 'tie'],
         ['food', 'in', 'plate'],
+        ['table', 'behind', 'person'],
+        ['glass', 'on', 'table'],
+        ['plate', 'on', 'table'],
       ],
     ]
+    self.gt_labels = ['chef', 'doctor', 'engineer', 'farmer', 'firefighter', 'judge', 'mechanic', 'pilot', 'police', 'waiter']
 
     self.wordnet_neighbors = build_wordnet_neighbors_dict(self.wordnet)
 
@@ -195,7 +264,8 @@ class HandcraftedSceneGraphDataset(Dataset):
     boxes = torch.stack(boxes)
     triples = torch.LongTensor(triples)
     image = None
-    return image, objs, boxes, triples, hide_obj_mask
+    gt_label = self.gt_labels[index]
+    return image, objs, boxes, triples, hide_obj_mask, gt_label
 
 
 def find_in_tensor(tensor, value):
@@ -250,7 +320,9 @@ def collate_fn_nopairs_noimgs(batch):
 
   all_hide_obj_masks = []
 
-  for i, (img, objs, boxes, triples, hide_obj_mask) in enumerate(batch):
+  all_gt_labels = []
+
+  for i, (img, objs, boxes, triples, hide_obj_mask, gt_label) in enumerate(batch):
 
     #all_imgs.append(img[None])
     num_objs, num_triples = objs.size(0), triples.size(0)
@@ -278,6 +350,8 @@ def collate_fn_nopairs_noimgs(batch):
 
     obj_offset += num_objs
 
+    all_gt_labels.append(gt_label)
+
   all_imgs_masked = torch.tensor([])
 
   all_imgs = torch.tensor([])
@@ -290,7 +364,7 @@ def collate_fn_nopairs_noimgs(batch):
 
   return all_imgs, all_objs, all_boxes, all_triples, \
          all_obj_to_img, all_triple_to_img, all_imgs_masked, \
-         all_hide_obj_masks
+         all_hide_obj_masks, all_gt_labels
 
 
 from simsg.model import get_left_right_top_bottom
