@@ -104,7 +104,7 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
   cos_sim = torch.nn.CosineSimilarity(dim=-1)
 
-  class_embeddings = model.obj_embeddings
+  class_embeddings = model.obj_embeddings.weight.data
 
   len_loader = len(loader)
   for i, batch in enumerate(loader):
@@ -120,14 +120,26 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
     model_out = model(objs, triples, hide_obj_mask=hide_obj_mask)
 
+    use_classification_layer = False
     nodes_pred, num_objs, classification_scores = model_out
     nodes_pred = nodes_pred[:num_objs]
-    classification_scores = classification_scores[:num_objs]
-    node_classes_preds = torch.argmax(classification_scores, dim=1)
-    correct = torch.sum(node_classes_preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # only count hidden nodes
-    total = torch.sum(hide_obj_mask).item()
-    total_correct += correct
-    total_objs += total
+    if use_classification_layer:
+      classification_scores = classification_scores[:num_objs]
+      node_classes_preds = torch.argmax(classification_scores, dim=1)
+      correct = torch.sum(node_classes_preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # only count hidden nodes
+      total = torch.sum(hide_obj_mask).item()
+      total_correct += correct
+      total_objs += total
+    else:
+      preds = []
+      for node_pred in nodes_pred:
+        classes_dists = cos_sim(node_pred, class_embeddings)
+        preds.append(torch.argmax(classes_dists, dim=-1))
+      preds = torch.stack(preds, dim=0)
+      correct = torch.sum(preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # only count hidden nodes
+      total = torch.sum(hide_obj_mask).item()
+      total_correct += correct
+      total_objs += total
     # print(node_classes_preds)
     # profession_node_emb = nodes_pred[-1]
     # classes_dists = [cos_sim(profession_node_emb, c) for c in class_embeddings]
@@ -137,6 +149,8 @@ def run_model(args, checkpoint, output_dir, loader=None):
     # print(f"Ground truth: {gt_label}")
     # print([x.item() for x in classes_dists])
     print(f"{i:4d}/{len_loader}", end="\r")
+    if i == 100:
+      break
   print("")
   print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
 
