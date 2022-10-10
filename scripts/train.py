@@ -68,7 +68,7 @@ def argument_parser():
 
   # Optimization hyperparameters
   parser.add_argument('--batch_size', default=32, type=int)
-  parser.add_argument('--num_iterations', default=500, type=int)
+  parser.add_argument('--num_iterations', default=5000, type=int)
   parser.add_argument('--learning_rate', default=2e-3, type=float)
 
   # Dataset options
@@ -244,7 +244,13 @@ def build_img_discriminator(args, vocab):
   return discriminator, d_kwargs
 
 
+def get_rec_loss_func():
+  return torch.nn.CosineSimilarity(dim=-1)
+
+
 def calc_total_loss(rec_loss, cl_loss):
+  if cl_loss is None:
+    return rec_loss
   return rec_loss * 9 / 10 + cl_loss / 10
 
 
@@ -256,8 +262,8 @@ def check_model(args, t, loader, model):
   all_losses = defaultdict(list)
   total_correct = 0
   total_objs = 0
-  loss = torch.nn.MSELoss()
-  classification_loss = torch.nn.CrossEntropyLoss()
+  loss = get_rec_loss_func()
+  #classification_loss = torch.nn.CrossEntropyLoss()
   with torch.no_grad():
     for batch in loader:
       batch = [tensor.cuda() for tensor in batch]
@@ -286,13 +292,13 @@ def check_model(args, t, loader, model):
 
       skip_pixel_loss = False
       objs_gt_vecs = model.obj_embeddings(objs)
-      rec_loss = loss(nodes_vecs_pred, objs_gt_vecs)
-      cl_loss = classification_loss(classification_scores, objs)
-      total_loss = calc_total_loss(rec_loss, cl_loss)
+      rec_loss = torch.sub(torch.tensor(1), loss(nodes_vecs_pred, objs_gt_vecs)).mean()
+      #cl_loss = classification_loss(classification_scores, objs)
+      total_loss = calc_total_loss(rec_loss, None)
       losses = {
         'total_loss': total_loss,
         'rec_loss': rec_loss,
-        'cl_loss': cl_loss
+        #'cl_loss': cl_loss
       }
 
       for loss_name, loss_val in losses.items():
@@ -337,8 +343,8 @@ def main(args):
   optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=args.learning_rate)
 
-  loss = torch.nn.MSELoss()
-  classification_loss = torch.nn.CrossEntropyLoss()
+  loss = get_rec_loss_func()
+  #classification_loss = torch.nn.CrossEntropyLoss()
 
   restore_path = None
   if args.checkpoint_start_from is not None:
@@ -405,14 +411,14 @@ def main(args):
         losses = {}
         # Loss over all predictions
         objs_gt_vecs = model.obj_embeddings(objs)
-        rec_loss = loss(nodes_pred, objs_gt_vecs)
+        rec_loss = torch.sub(torch.tensor(1), loss(nodes_pred, objs_gt_vecs)).mean()
         # Classification
-        cl_loss = classification_loss(classification_scores, objs)
-        total_loss = calc_total_loss(rec_loss, cl_loss)
+        #cl_loss = classification_loss(classification_scores, objs)
+        total_loss = calc_total_loss(rec_loss, None)
 
       losses['total_loss'] = total_loss.item()
       losses['rec_loss'] = rec_loss.item()
-      losses['cl_loss'] = cl_loss.item()
+      #losses['cl_loss'] = cl_loss.item()
       if not math.isfinite(losses['total_loss']):
         print('WARNING: Got loss = NaN, not backpropping')
         continue
