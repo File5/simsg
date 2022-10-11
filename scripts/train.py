@@ -71,6 +71,8 @@ def argument_parser():
   parser.add_argument('--num_iterations', default=5000, type=int)
   parser.add_argument('--learning_rate', default=2e-3, type=float)
 
+  parser.add_argument('--use_classification_layer', default=False, type=bool_flag)
+
   # Dataset options
   parser.add_argument('--image_size', default='64,64', type=int_tuple)
   parser.add_argument('--num_train_samples', default=None, type=int)
@@ -263,7 +265,10 @@ def check_model(args, t, loader, model):
   total_correct = 0
   total_objs = 0
   loss = get_rec_loss_func()
-  #classification_loss = torch.nn.CrossEntropyLoss()
+  if args.use_classification_layer:
+    classification_loss = torch.nn.CrossEntropyLoss()
+  cos_sim = torch.nn.CosineSimilarity(dim=-1)
+  class_embeddings = model.obj_embeddings.weight.data
   with torch.no_grad():
     for batch in loader:
       batch = [tensor.cuda() for tensor in batch]
@@ -282,24 +287,38 @@ def check_model(args, t, loader, model):
                         src_image=imgs_in, imgs_src=imgs_src)
       nodes_vecs_pred, num_objs, classification_scores = model_out
       nodes_vecs_pred = nodes_vecs_pred[:num_objs]
-      classification_scores = classification_scores[:num_objs]
 
-      node_classes_preds = torch.argmax(classification_scores, dim=1)
-      correct = torch.sum(node_classes_preds == objs).item()
-      total = num_objs
+      if args.use_classification_layer:
+        classification_scores = classification_scores[:num_objs]
+        node_classes_preds = torch.argmax(classification_scores, dim=1)
+        correct = torch.sum(node_classes_preds == objs).item()
+        total = num_objs
+      else:
+        preds = []
+        for node_pred in nodes_vecs_pred:
+          classes_dists = cos_sim(node_pred, class_embeddings)
+          preds.append(torch.argmax(classes_dists, dim=-1))
+        preds = torch.stack(preds, dim=0)
+        correct = torch.sum(preds == objs).item()  # with [hide_obj_mask] - only count hidden nodes
+        total = num_objs #torch.sum(hide_obj_mask).item()
+
       total_correct += correct
       total_objs += total
 
       skip_pixel_loss = False
       objs_gt_vecs = model.obj_embeddings(objs)
       rec_loss = torch.sub(torch.tensor(1), loss(nodes_vecs_pred, objs_gt_vecs)).mean()
-      #cl_loss = classification_loss(classification_scores, objs)
-      total_loss = calc_total_loss(rec_loss, None)
+      if args.use_classification_layer:
+        cl_loss = classification_loss(classification_scores, objs)
+        total_loss = calc_total_loss(rec_loss, cl_loss)
+      else:
+        total_loss = calc_total_loss(rec_loss, None)
       losses = {
         'total_loss': total_loss,
         'rec_loss': rec_loss,
-        #'cl_loss': cl_loss
       }
+      if args.use_classification_layer:
+        losses['cl_loss'] = cl_loss
 
       for loss_name, loss_val in losses.items():
         all_losses[loss_name].append(loss_val)
@@ -344,7 +363,8 @@ def main(args):
                                lr=args.learning_rate)
 
   loss = get_rec_loss_func()
-  #classification_loss = torch.nn.CrossEntropyLoss()
+  if args.use_classification_layer:
+    classification_loss = torch.nn.CrossEntropyLoss()
 
   restore_path = None
   if args.checkpoint_start_from is not None:
@@ -413,12 +433,16 @@ def main(args):
         objs_gt_vecs = model.obj_embeddings(objs)
         rec_loss = torch.sub(torch.tensor(1), loss(nodes_pred, objs_gt_vecs)).mean()
         # Classification
-        #cl_loss = classification_loss(classification_scores, objs)
-        total_loss = calc_total_loss(rec_loss, None)
+        if args.use_classification_layer:
+          cl_loss = classification_loss(classification_scores, objs)
+          total_loss = calc_total_loss(rec_loss, cl_loss)
+        else:
+          total_loss = calc_total_loss(rec_loss, None)
 
       losses['total_loss'] = total_loss.item()
       losses['rec_loss'] = rec_loss.item()
-      #losses['cl_loss'] = cl_loss.item()
+      if args.use_classification_layer:
+        losses['cl_loss'] = cl_loss.item()
       if not math.isfinite(losses['total_loss']):
         print('WARNING: Got loss = NaN, not backpropping')
         continue
