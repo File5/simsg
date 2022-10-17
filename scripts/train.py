@@ -72,6 +72,7 @@ def argument_parser():
   parser.add_argument('--learning_rate', default=2e-3, type=float)
 
   parser.add_argument('--use_classification_layer', default=False, type=bool_flag)
+  parser.add_argument('--loss_only_hidden', default=False, type=bool_flag)
 
   # Dataset options
   parser.add_argument('--image_size', default='64,64', type=int_tuple)
@@ -438,7 +439,10 @@ def main(args):
         losses = {}
         # Loss over all predictions
         objs_gt_vecs = model.obj_embeddings(objs)
-        rec_loss = torch.sub(torch.tensor(1), loss(nodes_pred, objs_gt_vecs)).mean()
+        if args.loss_only_hidden:
+          rec_loss = torch.sub(torch.tensor(1), loss(nodes_pred, objs_gt_vecs))[hide_obj_mask].mean()
+        else:
+          rec_loss = torch.sub(torch.tensor(1), loss(nodes_pred, objs_gt_vecs)).mean()
         # Classification
         if args.use_classification_layer:
           cl_loss = classification_loss(classification_scores, objs)
