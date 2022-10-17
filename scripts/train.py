@@ -263,6 +263,7 @@ def check_model(args, t, loader, model):
   num_samples = 0
   all_losses = defaultdict(list)
   total_correct = 0
+  total_correct_hidden = 0
   total_objs = 0
   loss = get_rec_loss_func()
   if args.use_classification_layer:
@@ -277,6 +278,8 @@ def check_model(args, t, loader, model):
 
       if args.dataset == "vg" or (args.dataset == "clevr" and not args.is_supervised):
         imgs, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in = batch
+        if args.hide_obj_nodes:
+          hide_obj_mask = hide_nodes(args, objs)
       elif args.dataset == "clevr":
         imgs, imgs_src, objs, objs_src, boxes, boxes_src, triples, triples_src, obj_to_img, \
         triple_to_img, imgs_in = batch
@@ -284,7 +287,7 @@ def check_model(args, t, loader, model):
       model_masks = masks
 
       model_out = model(objs, triples, obj_to_img, boxes_gt=boxes, masks_gt=model_masks,
-                        src_image=imgs_in, imgs_src=imgs_src)
+                        src_image=imgs_in, imgs_src=imgs_src, hide_obj_mask=hide_obj_mask)
       nodes_vecs_pred, num_objs, classification_scores = model_out
       nodes_vecs_pred = nodes_vecs_pred[:num_objs]
 
@@ -299,10 +302,12 @@ def check_model(args, t, loader, model):
           classes_dists = cos_sim(node_pred, class_embeddings)
           preds.append(torch.argmax(classes_dists, dim=-1))
         preds = torch.stack(preds, dim=0)
-        correct = torch.sum(preds == objs).item()  # with [hide_obj_mask] - only count hidden nodes
+        correct = torch.sum(preds == objs).item() 
+        correct_hidden = torch.sum(preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # with [hide_obj_mask] - only count hidden nodes
         total = num_objs #torch.sum(hide_obj_mask).item()
 
       total_correct += correct
+      total_correct_hidden += correct_hidden
       total_objs += total
 
       skip_pixel_loss = False
@@ -330,10 +335,12 @@ def check_model(args, t, loader, model):
     # samples['gt_img'] = imgs
 
     mean_losses = {k: np.mean(list(map(lambda x: x.cpu(), v))) for k, v in all_losses.items()}
+    accuracy_hidden = total_correct_hidden / total_objs
     accuracy = total_correct / total_objs
-    mean_losses['acc'] = accuracy
+    mean_losses['acc'] = accuracy_hidden
+    mean_losses['acc_all'] = accuracy
 
-  out = [mean_losses, accuracy]
+  out = [mean_losses, accuracy_hidden, accuracy]
 
   return tuple(out)
 
@@ -458,17 +465,21 @@ def main(args):
       if t % args.checkpoint_every == 0:
         print('checking on train')
         train_results = check_model(args, t, train_loader, model)
-        t_losses, t_accuracy = train_results
+        t_losses, t_accuracy, t_accuracy_all = train_results
 
         print('checking on val')
         val_results = check_model(args, t, val_loader, model)
-        val_losses, val_accuracy = val_results
+        val_losses, val_accuracy, val_accuracy_all = val_results
 
         print('train accuracy: ', t_accuracy)
+        print('train accuracy all: ', t_accuracy_all)
         print('val accuracy: ', val_accuracy)
+        print('val accuracy all: ', val_accuracy_all)
         # write IoU to tensorboard
         writer.add_scalar('train accuracy', t_accuracy, global_step=t)
+        writer.add_scalar('train accuracy all', t_accuracy_all, global_step=t)
         writer.add_scalar('val accuracy', val_accuracy, global_step=t)
+        writer.add_scalar('val accuracy all', val_accuracy_all, global_step=t)
         # write losses to tensorboard
         for k, v in t_losses.items():
           writer.add_scalar('Train {}'.format(k), v, global_step=t)
