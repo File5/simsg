@@ -860,6 +860,10 @@ class GATModel(nn.Module):
             Concat(),
             GATConv(64 * 4, 64, 4),
             Concat(),
+            GATConv(64 * 4, 64, 4),
+            Concat(),
+            GATConv(64 * 4, 64, 4),
+            Concat(),
             GATConv(64 * 4, gat_input_dims, 6),
             Avg(),
         ]
