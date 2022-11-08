@@ -851,7 +851,7 @@ class GATModel(nn.Module):
                 gconv_input_dims = embedding_dim + 4
                 pooled_feat_dim = embedding_dim
         gat_input_dims = pooled_feat_dim
-        gat_dim = gconv_dim
+        gat_output_dims = embedding_dim
 
         gat_num_heads = 4
         #self.gat = GATConv(graph_features_dim, gat_out_dim, gat_num_heads)
@@ -864,11 +864,11 @@ class GATModel(nn.Module):
             Concat(),
             GATConv(64 * 4, 64, 4),
             Concat(),
-            GATConv(64 * 4, gat_input_dims, 6),
+            GATConv(64 * 4, gat_output_dims, 6),
             Avg(),
         ]
         self.gat = DGLSequential(*gat_layers)
-        self.classification_layer = torch.nn.Linear(gat_input_dims, num_objs)
+        self.classification_layer = torch.nn.Linear(gat_output_dims, num_objs)
 
         hidden_obj_embedding = torch.ones(size=(embedding_dim, ))  # replace with zeros/ones, try different params than GloVe
         # Save in state_dict, but don't include in model parameters (i.e. don't train)
@@ -876,6 +876,7 @@ class GATModel(nn.Module):
         print('hidden_obj_embedding', self.hidden_obj_embedding)
 
         if not (self.is_baseline or self.is_supervised):
+            print("Using visual features")
             self.high_level_feats = self.build_obj_feats_net()
             # freeze vgg
             for param in self.high_level_feats.parameters():
