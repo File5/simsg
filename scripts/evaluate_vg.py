@@ -118,7 +118,7 @@ def run_model(args, checkpoint, output_dir, loader=None):
     # ]
     hide_obj_mask = hide_nodes(hide_args, objs)
 
-    model_out = model(objs, triples, hide_obj_mask=hide_obj_mask)
+    model_out = model(objs, triples, boxes_gt=boxes, src_image=imgs_in, hide_obj_mask=hide_obj_mask)
 
     use_classification_layer = False
     nodes_pred, num_objs, classification_scores = model_out
