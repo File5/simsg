@@ -870,7 +870,7 @@ class GATModel(nn.Module):
         self.gat = DGLSequential(*gat_layers)
         self.classification_layer = torch.nn.Linear(gat_output_dims, num_objs)
 
-        hidden_obj_embedding = torch.ones(size=(embedding_dim, ))  # replace with zeros/ones, try different params than GloVe
+        hidden_obj_embedding = torch.ones(size=(gconv_input_dims, ))  # replace with zeros/ones, try different params than GloVe
         # Save in state_dict, but don't include in model parameters (i.e. don't train)
         self.register_buffer('hidden_obj_embedding', hidden_obj_embedding)
         print('hidden_obj_embedding', self.hidden_obj_embedding)
@@ -1010,8 +1010,6 @@ class GATModel(nn.Module):
         edges = torch.stack([s, o], dim=1)  # Shape is (num_triples, 2)
 
         obj_vecs = self.obj_embeddings(objs)
-        if hide_obj_mask is not None:
-            obj_vecs[hide_obj_mask] = self.hidden_obj_embedding.to(obj_vecs.device)
 
         if obj_to_img is None:
             obj_to_img = torch.zeros(num_objs, dtype=objs.dtype, device=objs.device)
@@ -1053,6 +1051,9 @@ class GATModel(nn.Module):
             obj_vecs = self.layer_norm(obj_vecs)
 
         pred_vecs = self.pred_embeddings(p)
+  
+        if hide_obj_mask is not None:
+            obj_vecs[hide_obj_mask] = self.hidden_obj_embedding.to(obj_vecs.device)
 
         # GAT pass
         if not (self.is_baseline or self.is_supervised):
