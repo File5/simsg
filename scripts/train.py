@@ -71,7 +71,7 @@ def argument_parser():
   parser.add_argument('--num_iterations', default=5000, type=int)
   parser.add_argument('--learning_rate', default=2e-3, type=float)
 
-  parser.add_argument('--use_classification_layer', default=False, type=bool_flag)
+  parser.add_argument('--use_classification_layer', default=True, type=bool_flag)  # Classification layer is always used during training
   parser.add_argument('--loss_only_hidden', default=False, type=bool_flag)
 
   # Dataset options
@@ -110,7 +110,7 @@ def argument_parser():
   parser.add_argument('--selective_discr_obj', default=True, type=bool_flag)
   parser.add_argument('--feats_in_gcn', default=True, type=bool_flag)
   parser.add_argument('--feats_out_gcn', default=True, type=bool_flag)
-  parser.add_argument('--is_baseline', default=True, type=int)
+  parser.add_argument('--is_baseline', default=True, type=int)  # no image features are used when is_baseline is True
   parser.add_argument('--is_supervised', default=False, type=int)
 
   # Generator losses
@@ -263,12 +263,12 @@ def check_model(args, t, loader, model):
 
   num_samples = 0
   all_losses = defaultdict(list)
-  total_correct = 0
-  total_correct_hidden = 0
-  total_objs = 0
+  total = {
+    k: {'correct': 0, 'correct_hidden': 0, 'objs': 0}
+    for k in ('cls', 'cossim')
+  }
   loss = get_rec_loss_func()
-  if args.use_classification_layer:
-    classification_loss = torch.nn.CrossEntropyLoss()
+  classification_loss = torch.nn.CrossEntropyLoss()
   cos_sim = torch.nn.CosineSimilarity(dim=-1)
   class_embeddings = model.obj_embeddings.weight.data
   with torch.no_grad():
@@ -292,24 +292,29 @@ def check_model(args, t, loader, model):
       nodes_vecs_pred, num_objs, classification_scores = model_out
       nodes_vecs_pred = nodes_vecs_pred[:num_objs]
 
-      if args.use_classification_layer:
-        classification_scores = classification_scores[:num_objs]
-        node_classes_preds = torch.argmax(classification_scores, dim=1)
-        correct = torch.sum(node_classes_preds == objs).item()
-        total = num_objs
-      else:
-        preds = []
-        for node_pred in nodes_vecs_pred:
-          classes_dists = cos_sim(node_pred, class_embeddings)
-          preds.append(torch.argmax(classes_dists, dim=-1))
-        preds = torch.stack(preds, dim=0)
-        correct = torch.sum(preds == objs).item() 
-        correct_hidden = torch.sum(preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # with [hide_obj_mask] - only count hidden nodes
-        total = num_objs #torch.sum(hide_obj_mask).item()
+      # classification layer based predictions
+      classification_scores = classification_scores[:num_objs]
+      node_classes_preds = torch.argmax(classification_scores, dim=1)
+      cls_correct = torch.sum(node_classes_preds == objs).item()
+      cls_correct_hidden = torch.sum(node_classes_preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # with [hide_obj_mask] - only count hidden nodes
+      cls_total = num_objs
 
-      total_correct += correct
-      total_correct_hidden += correct_hidden
-      total_objs += total
+      # cosine similarity based predictions
+      preds = []
+      for node_pred in nodes_vecs_pred:
+        classes_dists = cos_sim(node_pred, class_embeddings)
+        preds.append(torch.argmax(classes_dists, dim=-1))
+      preds = torch.stack(preds, dim=0)
+      cossim_correct = torch.sum(preds == objs).item() 
+      cossim_correct_hidden = torch.sum(preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # with [hide_obj_mask] - only count hidden nodes
+      cossim_total = num_objs #torch.sum(hide_obj_mask).item()
+
+      total['cls']['correct'] += cls_correct
+      total['cls']['correct_hidden'] += cls_correct_hidden
+      total['cls']['objs'] += cls_total
+      total['cossim']['correct'] += cossim_correct
+      total['cossim']['correct_hidden'] += cossim_correct_hidden
+      total['cossim']['objs'] += cossim_total
 
       skip_pixel_loss = False
       objs_gt_vecs = model.obj_embeddings(objs)
@@ -336,12 +341,17 @@ def check_model(args, t, loader, model):
     # samples['gt_img'] = imgs
 
     mean_losses = {k: np.mean(list(map(lambda x: x.cpu(), v))) for k, v in all_losses.items()}
-    accuracy_hidden = total_correct_hidden / total_objs
-    accuracy = total_correct / total_objs
-    mean_losses['acc'] = accuracy_hidden
-    mean_losses['acc_all'] = accuracy
+    cls_accuracy_hidden = total['cls']['correct_hidden'] / total['cls']['objs']
+    cls_accuracy = total['cls']['correct'] / total['cls']['objs']
+    cossim_accuracy_hidden = total['cossim']['correct_hidden'] / total['cossim']['objs']
+    cossim_accuracy = total['cossim']['correct'] / total['cossim']['objs']
+    mean_losses['cls_acc'] = cls_accuracy_hidden
+    mean_losses['cls_acc_all'] = cls_accuracy
+    mean_losses['cossim_acc'] = cossim_accuracy_hidden
+    mean_losses['cossim_acc_all'] = cossim_accuracy
 
-  out = [mean_losses, accuracy_hidden, accuracy]
+  acc_dict = {t: {'acc': mean_losses[t + '_acc'], 'acc_all': mean_losses[t + '_acc_all']} for t in ['cls', 'cossim']}
+  out = [mean_losses, acc_dict]
 
   return tuple(out)
 
@@ -445,7 +455,7 @@ def main(args):
           rec_loss = torch.sub(torch.tensor(1), loss(nodes_pred, objs_gt_vecs)).mean()
         # Classification
         if args.use_classification_layer:
-          cl_loss = classification_loss(classification_scores, objs)
+          cl_loss = classification_loss(classification_scores, objs)  # TODO: Is using classification layer improveds accuracy
           total_loss = calc_total_loss(rec_loss, cl_loss)
         else:
           total_loss = calc_total_loss(rec_loss, None)
@@ -469,21 +479,23 @@ def main(args):
       if t % args.checkpoint_every == 0:
         print('checking on train')
         train_results = check_model(args, t, train_loader, model)
-        t_losses, t_accuracy, t_accuracy_all = train_results
+        t_losses, t_accuracy = train_results
 
         print('checking on val')
         val_results = check_model(args, t, val_loader, model)
-        val_losses, val_accuracy, val_accuracy_all = val_results
+        val_losses, val_accuracy = val_results
 
         print('train accuracy: ', t_accuracy)
-        print('train accuracy all: ', t_accuracy_all)
         print('val accuracy: ', val_accuracy)
-        print('val accuracy all: ', val_accuracy_all)
         # write IoU to tensorboard
-        writer.add_scalar('train accuracy', t_accuracy, global_step=t)
-        writer.add_scalar('train accuracy all', t_accuracy_all, global_step=t)
-        writer.add_scalar('val accuracy', val_accuracy, global_step=t)
-        writer.add_scalar('val accuracy all', val_accuracy_all, global_step=t)
+        writer.add_scalar('train cls accuracy', t_accuracy['cls']['acc'], global_step=t)
+        writer.add_scalar('train cls accuracy all', t_accuracy['cls']['acc_all'], global_step=t)
+        writer.add_scalar('train cossim accuracy', t_accuracy['cossim']['acc'], global_step=t)
+        writer.add_scalar('train cossim accuracy all', t_accuracy['cossim']['acc_all'], global_step=t)
+        writer.add_scalar('val cls accuracy', val_accuracy['cls']['acc'], global_step=t)
+        writer.add_scalar('val cls accuracy all', val_accuracy['cls']['acc_all'], global_step=t)
+        writer.add_scalar('val cossim accuracy', val_accuracy['cossim']['acc'], global_step=t)
+        writer.add_scalar('val cossim accuracy all', val_accuracy['cossim']['acc_all'], global_step=t)
         # write losses to tensorboard
         for k, v in t_losses.items():
           writer.add_scalar('Train {}'.format(k), v, global_step=t)
