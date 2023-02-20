@@ -839,6 +839,7 @@ class GATModel(nn.Module):
         self.obj_embeddings = self.load_glove_embeddings(vocab['object_idx_to_name'])
         # TODO: multiple words - we can concatenate word embs; for single word - repeat twice
         self.pred_embeddings = self.load_glove_embeddings(vocab['pred_idx_to_name'])
+        # TODO: del glove to release memory
 
         if self.is_baseline or self.is_supervised:
             gconv_input_dims = embedding_dim
