@@ -134,6 +134,7 @@ class CustomSceneGraphDataset(Dataset):
     rel_labels = []
     rel_scores = []
     triples = []
+    obj_names = box_labels
     for i in range(len(all_rel_pairs)):
         if all_rel_pairs[i][0] < box_topk and all_rel_pairs[i][1] < box_topk:
             rel_scores.append(all_rel_scores[i])
@@ -143,7 +144,7 @@ class CustomSceneGraphDataset(Dataset):
 
     rel_labels = rel_labels[:rel_topk]
     rel_scores = rel_scores[:rel_topk]
-    return triples
+    return triples, obj_names, boxes
 
   def get_object_idx(self, obj_name):
     DEFAULT_SUFFIX = '.n.01'
@@ -154,6 +155,25 @@ class CustomSceneGraphDataset(Dataset):
       k = '__image__'
     return self.vocab['object_name_to_idx'][k]
 
+  def get_size(self, image_size):
+      min_size = 600
+      max_size = 1000
+      w, h = image_size
+      size = min_size
+      if max_size is not None:
+          min_original_size = float(min((w, h)))
+          max_original_size = float(max((w, h)))
+          if max_original_size / min_original_size * size > max_size:
+              size = int(round(max_size * min_original_size / max_original_size))
+      if (w <= h and w == size) or (h <= w and h == size):
+          return (w, h)
+      if w < h:
+          ow = size
+          oh = int(size * h / w)
+      else:
+          oh = size
+          ow = int(size * w / h)
+      return (ow, oh)
 
   def __getitem__(self, index):
     """
@@ -169,14 +189,15 @@ class CustomSceneGraphDataset(Dataset):
     #return self.get_graph_data(index) # TODO: remove, debug only
     #return os.path.join(self.image_dir, self.image_paths[index])
 
+    img_path = os.path.join(self.image_dir, self.image_paths[index])
+    with open(img_path, 'rb') as f:
+      with PIL.Image.open(f) as image:
+        WW, HH = image.size
+        #print(WW, HH)
+        image = self.transform(image.convert('RGB'))
+
     map_overlapping_obj = {}
-    graph_data = self.get_graph_data(index)
-    obj_names = []
-    for s, p, o in graph_data:
-      if s not in obj_names:
-        obj_names.append(s)
-      if o not in obj_names:
-        obj_names.append(o)
+    graph_data, obj_names, orig_boxes = self.get_graph_data(index)
     obj_idxs = [self.get_object_idx(n) for n in obj_names]
 
     objs = []
@@ -184,9 +205,11 @@ class CustomSceneGraphDataset(Dataset):
 
     obj_idx_mapping = {}
     counter = 0
+    WW, HH = self.get_size((WW, HH))
     for i, obj_idx in enumerate(obj_idxs):
       curr_obj = obj_idx
-      curr_box = torch.FloatTensor([0, 0, 1, 1])
+      x1, y1, x2, y2 = orig_boxes[i]
+      curr_box = torch.FloatTensor([x1/WW, y1/HH, x2/WW, y2/HH])
 
       objs.append(curr_obj)
       boxes.append(curr_box)
@@ -258,13 +281,6 @@ class CustomSceneGraphDataset(Dataset):
     objs = torch.LongTensor(objs)
     boxes = torch.stack(boxes)
     triples = torch.LongTensor(triples)
-
-    img_path = os.path.join(self.image_dir, self.image_paths[index])
-    with open(img_path, 'rb') as f:
-      with PIL.Image.open(f) as image:
-        WW, HH = image.size
-        #print(WW, HH)
-        image = self.transform(image.convert('RGB'))
 
     gt_label = self.gt_labels[index]
     return image, objs, boxes, triples, hide_obj_mask, gt_label
