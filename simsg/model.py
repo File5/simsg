@@ -1025,7 +1025,7 @@ class GATModel(nn.Module):
 
             boxes_prior = boxes_gt * box_keep
 
-            obj_crop = get_cropped_objs(in_image, boxes_gt, obj_to_img, feats_keep, box_keep, evaluating, mode)
+            obj_crop = get_cropped_objs(in_image, boxes_gt, obj_to_img, feats_keep, box_keep, evaluating, mode, masked_feats=False)
 
             high_feats = self.high_level_feats(obj_crop)
 

@@ -312,7 +312,7 @@ def add_person_is_hidden(dataset, objs, boxes, triples):
   return objs, boxes, triples, hide_obj_mask
 
 
-def collate_fn_nopairs_noimgs(batch):
+def collate_fn_nopairs_imgs(batch):
   """
   Collate function to be used when wrapping a HandcraftedSceneGraphDataset in a
   DataLoader. Returns a tuple of the following:
@@ -342,7 +342,7 @@ def collate_fn_nopairs_noimgs(batch):
 
   for i, (img, objs, boxes, triples, hide_obj_mask, gt_label) in enumerate(batch):
 
-    #all_imgs.append(img[None])
+    all_imgs.append(img[None])
     num_objs, num_triples = objs.size(0), triples.size(0)
 
     all_objs.append(objs)
@@ -360,19 +360,19 @@ def collate_fn_nopairs_noimgs(batch):
 
     # prepare input 4-channel image
     # initialize mask channel with zeros
-    #masked_img = img.clone()
-    #mask = torch.zeros_like(masked_img)
-    #mask = mask[0:1,:,:]
-    #masked_img = torch.cat([masked_img, mask], 0)
-    #all_imgs_masked.append(masked_img[None])
+    masked_img = img.clone()
+    mask = torch.zeros_like(masked_img)
+    mask = mask[0:1,:,:]
+    masked_img = torch.cat([masked_img, mask], 0)
+    all_imgs_masked.append(masked_img[None])
 
     obj_offset += num_objs
 
     all_gt_labels.append(gt_label)
 
-  all_imgs_masked = torch.tensor([])
+  all_imgs_masked = torch.cat(all_imgs_masked)
 
-  all_imgs = torch.tensor([])
+  all_imgs = torch.cat(all_imgs)
   all_objs = torch.cat(all_objs)
   all_boxes = torch.cat(all_boxes)
   all_hide_obj_masks = torch.cat(all_hide_obj_masks)

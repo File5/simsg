@@ -71,8 +71,10 @@ parser.add_argument('--random_feats', default=False, type=bool_flag)
 VG_DIR = os.path.expanduser('./datasets/vg')
 SPLIT = "test"
 parser.add_argument('--data_h5', default=os.path.join(VG_DIR, SPLIT + '.h5'))
+DATASET_DIR = './datasets/sgcustom'
+parser.add_argument('--dataset_path', default=DATASET_DIR)
 parser.add_argument('--data_image_dir',
-        default=os.path.join(VG_DIR, 'images'))
+        default=os.path.join(DATASET_DIR, 'images'))
 
 args = parser.parse_args()
 args.dataset = "sgcustom"
@@ -111,7 +113,8 @@ def run_model(args, checkpoint, output_dir, loader=None):
     #   x.cuda() for x in (imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in)
     # ]
 
-    model_out = model(objs, triples, hide_obj_mask=hide_obj_mask)
+    # imgs_in are masked images, imgs_gt are the original images (channels=3)
+    model_out = model(objs, triples, boxes_gt=boxes, src_image=imgs_in, hide_obj_mask=hide_obj_mask)
 
     nodes_pred, num_objs, classification_scores = model_out
     nodes_pred = nodes_pred[:num_objs]
