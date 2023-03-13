@@ -56,7 +56,7 @@ class CustomSceneGraphDataset(Dataset):
       self.data_info = json.load(f)
     self.idx_to_files = self.data_info['idx_to_files']
 
-    self.replace_img_filepath = '/dss/dsshome1/0D/ge24tav3/checkpoints/custom_images/'
+    self.replace_img_filepath = '/root/checkpoints/custom_images/'
     self.image_paths = []
     for path in self.idx_to_files:
         self.image_paths.append(path.replace(self.replace_img_filepath, ''))
@@ -66,12 +66,14 @@ class CustomSceneGraphDataset(Dataset):
     with open(os.path.join(dataset_path, 'custom_prediction.json'), 'r') as f:
       self.predictions = json.load(f)
 
-    with open(os.path.join(dataset_path, 'custom_gt.json'), 'r') as f:
-      gt_labels = json.load(f)
-      max_idx = max(map(int, gt_labels.keys()))
-      self.gt_labels = [None] * (max_idx + 1)
-      for idx, label in gt_labels.items():
-        self.gt_labels[int(idx)] = label
+    self.use_gt_file = False
+    if self.use_gt_file:
+      with open(os.path.join(dataset_path, 'custom_gt.json'), 'r') as f:
+        gt_labels = json.load(f)
+        max_idx = max(map(int, gt_labels.keys()))
+        self.gt_labels = [None] * (max_idx + 1)
+        for idx, label in gt_labels.items():
+          self.gt_labels[int(idx)] = label
 
     self.vocab = vocab
     self.num_objects = len(vocab['object_idx_to_name'])
@@ -263,7 +265,10 @@ class CustomSceneGraphDataset(Dataset):
     triples = []
     for s_name, p_name, o_name in graph_data:
       s = self.get_object_idx(s_name)
-      p = self.vocab['pred_name_to_idx'][p_name]
+      p = self.vocab['pred_name_to_idx'].get(p_name)
+      if p is None:
+        print('missing predicate: %s' % p_name)
+        continue
       o = self.get_object_idx(o_name)
       s = obj_idx_mapping.get(s, None)
       o = obj_idx_mapping.get(o, None)
@@ -282,7 +287,11 @@ class CustomSceneGraphDataset(Dataset):
     boxes = torch.stack(boxes)
     triples = torch.LongTensor(triples)
 
-    gt_label = self.gt_labels[index]
+    if self.use_gt_file:
+      gt_label = self.gt_labels[index]
+    else:
+      img_basename = os.path.split(os.path.splitext(self.image_paths[index])[0])[1]
+      gt_label = img_basename.split('-')[0]
     return image, objs, boxes, triples, hide_obj_mask, gt_label
 
 
@@ -294,6 +303,8 @@ def find_in_tensor(tensor, value):
 
 def add_person_is_hidden(dataset, objs, boxes, triples):
   person_idx = find_in_tensor(objs, dataset.vocab['object_name_to_idx']['person'])
+  if person_idx is None:
+    return objs, boxes, triples, torch.zeros(len(objs), dtype=torch.uint8)
   o = person_idx
   p = dataset.vocab['pred_name_to_idx']['_instance_hyponym']
   #objs = torch.cat([objs, torch.tensor([0])])
