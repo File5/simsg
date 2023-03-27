@@ -49,6 +49,7 @@ from simsg.losses import get_gan_losses, gan_percept_loss, GANLoss, VGGLoss
 from simsg.metrics import jaccard
 from simsg.model import SIMSGModel
 from simsg.model import GATModel
+#from simsg.model2 import GraphAEModel
 from simsg.utils import int_tuple
 from simsg.utils import timeit, bool_flag, LossManager
 
@@ -68,7 +69,7 @@ def argument_parser():
 
   # Optimization hyperparameters
   parser.add_argument('--batch_size', default=32, type=int)
-  parser.add_argument('--num_iterations', default=5000, type=int)
+  parser.add_argument('--num_iterations', default=500, type=int)
   parser.add_argument('--learning_rate', default=2e-3, type=float)
 
   parser.add_argument('--use_classification_layer', default=True, type=bool_flag)  # Classification layer is always used during training
@@ -78,7 +79,7 @@ def argument_parser():
   parser.add_argument('--image_size', default='64,64', type=int_tuple)
   parser.add_argument('--num_train_samples', default=None, type=int)
   parser.add_argument('--num_val_samples', default=1024, type=int)
-  parser.add_argument('--shuffle_val', default=True, type=bool_flag)
+  parser.add_argument('--shuffle_val', default=False, type=bool_flag)
   parser.add_argument('--loader_num_workers', default=4, type=int)
   parser.add_argument('--include_relationships', default=True, type=bool_flag)
   parser.add_argument('--hide_obj_nodes', default=True, type=bool_flag)
@@ -137,9 +138,9 @@ def argument_parser():
   parser.add_argument('--d_img_weight', default=1.0, type=float) # multiplied by d_loss_weight
 
   # Output options
-  parser.add_argument('--print_every', default=50, type=int)
+  parser.add_argument('--print_every', default=5, type=int)
   parser.add_argument('--timing', default=False, type=bool_flag)
-  parser.add_argument('--checkpoint_every', default=500, type=int)
+  parser.add_argument('--checkpoint_every', default=50, type=int)
   parser.add_argument('--eval_mode_after', default=1000000, type=int)
   parser.add_argument('--output_dir', default=os.getcwd())
   parser.add_argument('--checkpoint_name', default='checkpoint')

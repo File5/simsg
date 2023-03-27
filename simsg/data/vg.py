@@ -83,6 +83,7 @@ class SceneGraphNoPairsDataset(Dataset):
     self.wordnet_neighbors = build_wordnet_neighbors_dict(self.wordnet)
 
   def __len__(self):
+    return 1
     num = self.data['object_names'].size(0)
     if self.max_samples is not None:
       return min(self.max_samples, num)
