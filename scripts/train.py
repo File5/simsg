@@ -49,7 +49,7 @@ from simsg.losses import get_gan_losses, gan_percept_loss, GANLoss, VGGLoss
 from simsg.metrics import jaccard
 from simsg.model import SIMSGModel
 from simsg.model import GATModel
-#from simsg.model2 import GraphAEModel
+from simsg.model2 import GraphAEModel
 from simsg.utils import int_tuple
 from simsg.utils import timeit, bool_flag, LossManager
 
@@ -158,6 +158,14 @@ def argument_parser():
   parser.add_argument('--spade_gen_blocks', default=False, type=bool_flag)
   parser.add_argument('--layout_pooling', default="sum", type=str)
 
+  # model2 options
+  parser.add_argument('--gcn_mode', default='GCN', choices=['GCN', 'DisenGCN', 'FactorGCN',"GAT"])
+  parser.add_argument('--gat_layers', default=['gat', 'gcn', 'gcn', 'gcn', 'gcn', 'gcn'])
+  parser.add_argument('--embedding', default='normal', choices=['normal', 'glove', 'glove840'])
+
+  parser.add_argument('--train_sg2im', default=False)
+  parser.add_argument('--pretrained_graph', default=False)
+
   return parser
 
 
@@ -166,7 +174,9 @@ def build_model(args, vocab):
     checkpoint = torch.load(args.checkpoint_start_from)
     kwargs = checkpoint['model_kwargs']
     #model = SIMSGModel(**kwargs)
-    model = GATModel(**kwargs)
+    #model = GATModel(**kwargs)
+    #kwargs = checkpoint['kwargs']
+    model = GraphAEModel(**kwargs)
     raw_state_dict = checkpoint['model_state']
     state_dict = {}
     for k, v in raw_state_dict.items():
@@ -197,9 +207,27 @@ def build_model(args, vocab):
       'spade_blocks': args.spade_gen_blocks,
       'layout_pooling': args.layout_pooling
     }
+    kwargs = {
+      'vocab': vocab,
+      'image_size': args.image_size,
+      'embedding_dim': args.embedding_dim,
+      'gconv_dim': args.gconv_dim,
+      'gconv_hidden_dim': args.gconv_hidden_dim,
+      'gconv_num_layers': args.gconv_num_layers,
+      'img_feats_branch': args.image_feats,
+      'feats_in_gcn': args.feats_in_gcn,
+      'feats_out_gcn': args.feats_out_gcn,
+      'gcn_mode': args.gcn_mode,
+      'gat_layers': args.gat_layers,
+      'embedding': args.embedding,
+      'train_sg2im': args.train_sg2im,
+      'pretrained_graph': args.pretrained_graph,
+      'p_mask_eval': args.p_mask_eval
+    }
 
     #model = SIMSGModel(**kwargs)
-    model = GATModel(**kwargs)
+    #model = GATModel(**kwargs)
+    model = GraphAEModel(**kwargs)
 
   return model, kwargs
 
@@ -290,7 +318,10 @@ def check_model(args, t, loader, model):
 
       model_out = model(objs, triples, obj_to_img, boxes_gt=boxes, masks_gt=model_masks,
                         src_image=imgs_in, imgs_src=imgs_src, hide_obj_mask=hide_obj_mask)
-      nodes_vecs_pred, num_objs, classification_scores = model_out
+    # nodes_vecs_pred, num_objs, classification_scores = model_out
+    # return obj_vecs, pred_vecs, obj_vecs_orig, pred_vecs_orig, edges,                 nodes, rels, p, mask_vec
+      nodes_vecs_pred,         _,             _,              _,     _, classification_scores,    _, _, hide_obj_mask = model_out
+      num_objs = objs.size(0)
       nodes_vecs_pred = nodes_vecs_pred[:num_objs]
 
       # classification layer based predictions
@@ -366,6 +397,7 @@ def main(args):
   if args.hide_obj_nodes:
     torch.manual_seed(0)
 
+  args.p_mask_eval = 1
   print(args)
   check_args(args)
   float_dtype = torch.cuda.FloatTensor
@@ -440,7 +472,10 @@ def main(args):
         model_out = model(objs, triples, obj_to_img,
                           boxes_gt=model_boxes, masks_gt=model_masks, src_image=imgs_in, imgs_src=imgs_src, t=t,
                           hide_obj_mask=hide_obj_mask)
-        nodes_pred, num_objs, classification_scores = model_out
+      # nodes_pred, num_objs, classification_scores = model_out
+ # return obj_vecs, pred_vecs, obj_vecs_orig, pred_vecs_orig, edges,                 nodes, rels, p, mask_vec
+        nodes_pred,         _,             _,              _,     _, classification_scores,    _, _, hide_obj_mask = model_out
+        num_objs = objs.size(0)
         nodes_pred = nodes_pred[:num_objs]
         classification_scores = classification_scores[:num_objs]
 
