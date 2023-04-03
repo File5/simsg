@@ -36,3 +36,14 @@ Experiments
 +
 Results (15 pages)
 Conclusion
+
+# To do
+
+1. Test with the provided model of reconstruction
+
+compare evaluation: eval.py
+compare wn_n
+
+2. Debug the issue with training DSGAE model
+3. Look at the previous model (acc on VG)
+4. Try to extend graphs with WordNet in DSGAE repository
