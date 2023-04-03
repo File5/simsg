@@ -99,8 +99,18 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
   assert args.mode in ['auto_withfeats', 'auto_nofeats', 'reposition', 'replace', 'remove']
 
-  total_correct = 0
-  total_objs = 0
+  total = {
+    'cls': {
+      'correct': 0,
+      'correct_hidden': 0,
+      'objs': 0
+    },
+    'cossim': {
+      'correct': 0,
+      'correct_hidden': 0,
+      'objs': 0
+    },
+  }
 
   cos_sim = torch.nn.CosineSimilarity(dim=-1)
 
@@ -120,26 +130,31 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
     model_out = model(objs, triples, boxes_gt=boxes, src_image=imgs_in, hide_obj_mask=hide_obj_mask)
 
-    use_classification_layer = False
+    use_classification_layer = True
     nodes_pred, num_objs, classification_scores = model_out
     nodes_pred = nodes_pred[:num_objs]
-    if use_classification_layer:
-      classification_scores = classification_scores[:num_objs]
-      node_classes_preds = torch.argmax(classification_scores, dim=1)
-      correct = torch.sum(node_classes_preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # only count hidden nodes
-      total = torch.sum(hide_obj_mask).item()
-      total_correct += correct
-      total_objs += total
-    else:
-      preds = []
-      for node_pred in nodes_pred:
-        classes_dists = cos_sim(node_pred, class_embeddings)
-        preds.append(torch.argmax(classes_dists, dim=-1))
-      preds = torch.stack(preds, dim=0)
-      correct = torch.sum(preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # only count hidden nodes
-      total = torch.sum(hide_obj_mask).item()
-      total_correct += correct
-      total_objs += total
+
+    classification_scores = classification_scores[:num_objs]
+    node_classes_preds = torch.argmax(classification_scores, dim=1)
+    cls_correct = torch.sum(node_classes_preds == objs).item()  # only count hidden nodes
+    cls_correct_hidden = torch.sum(node_classes_preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # only count hidden nodes
+    cls_total = num_objs
+    total['cls']['correct'] += cls_correct
+    total['cls']['correct_hidden'] += cls_correct_hidden
+    total['cls']['objs'] += cls_total
+
+    preds = []
+    for node_pred in nodes_pred:
+      classes_dists = cos_sim(node_pred, class_embeddings)
+      preds.append(torch.argmax(classes_dists, dim=-1))
+    preds = torch.stack(preds, dim=0)
+    cossim_correct = torch.sum(preds == objs).item()
+    cossim_correct_hidden = torch.sum(preds[hide_obj_mask] == objs[hide_obj_mask]).item()  # only count hidden nodes
+    cossim_total = num_objs
+    total['cossim']['correct'] += cossim_correct
+    total['cossim']['correct_hidden'] += cossim_correct_hidden
+    total['cossim']['objs'] += cossim_total
+
     # print(node_classes_preds)
     # profession_node_emb = nodes_pred[-1]
     # classes_dists = [cos_sim(profession_node_emb, c) for c in class_embeddings]
@@ -152,7 +167,7 @@ def run_model(args, checkpoint, output_dir, loader=None):
     if i == 100:
       break
   print("")
-  print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
+  print(json.dumps(total, indent=4))
 
 
 def main(args):
