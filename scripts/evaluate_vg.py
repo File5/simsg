@@ -29,6 +29,7 @@ from imageio import imsave
 from simsg.model import SIMSGModel
 from simsg.model import glove
 from simsg.model import GATModel
+from simsg.model2 import GraphAEModel
 from simsg.utils import int_tuple, bool_flag
 from simsg.vis import draw_scene_graph
 
@@ -85,7 +86,8 @@ def hide_nodes(args, objs):
   return torch.rand(objs.size()) < prob
 
 def build_model(args, checkpoint):
-  model = GATModel(**checkpoint['model_kwargs'])
+  #model = GATModel(**checkpoint['model_kwargs'])
+  model = GraphAEModel(**checkpoint['model_kwargs'])
   model.load_state_dict(checkpoint['model_state'])
   model.eval()
   model.image_size = args.image_size
@@ -131,7 +133,8 @@ def run_model(args, checkpoint, output_dir, loader=None):
     model_out = model(objs, triples, boxes_gt=boxes, src_image=imgs_in, hide_obj_mask=hide_obj_mask)
 
     use_classification_layer = True
-    nodes_pred, num_objs, classification_scores = model_out
+    nodes_pred, _, _, _, _, classification_scores, _, _, hide_obj_mask = model_out
+    num_objs = objs.size(0)
     nodes_pred = nodes_pred[:num_objs]
 
     classification_scores = classification_scores[:num_objs]
