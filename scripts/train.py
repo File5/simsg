@@ -249,6 +249,7 @@ def build_img_discriminator(args, vocab):
 
 
 def get_rec_loss_func():
+  # TODO: try L2 or Hinge
   return torch.nn.CosineSimilarity(dim=-1)
 
 
