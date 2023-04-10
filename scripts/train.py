@@ -68,7 +68,7 @@ def argument_parser():
 
   # Optimization hyperparameters
   parser.add_argument('--batch_size', default=32, type=int)
-  parser.add_argument('--num_iterations', default=5000, type=int)
+  parser.add_argument('--num_iterations', default=50000, type=int)
   parser.add_argument('--learning_rate', default=2e-3, type=float)
 
   parser.add_argument('--use_classification_layer', default=True, type=bool_flag)  # Classification layer is always used during training
@@ -248,7 +248,7 @@ def build_img_discriminator(args, vocab):
 
 
 def get_rec_loss_func():
-  return torch.nn.CosineSimilarity(dim=-1)
+  return torch.nn.MSELoss()
 
 
 def calc_total_loss(rec_loss, cl_loss):
@@ -318,7 +318,7 @@ def check_model(args, t, loader, model):
 
       skip_pixel_loss = False
       objs_gt_vecs = model.obj_embeddings(objs)
-      rec_loss = torch.sub(torch.tensor(1), loss(nodes_vecs_pred, objs_gt_vecs)).mean()
+      rec_loss = loss(nodes_vecs_pred, objs_gt_vecs)
       if args.use_classification_layer:
         cl_loss = classification_loss(classification_scores, objs)
         total_loss = calc_total_loss(rec_loss, cl_loss)
@@ -450,9 +450,9 @@ def main(args):
         # Loss over all predictions
         objs_gt_vecs = model.obj_embeddings(objs)
         if args.loss_only_hidden:
-          rec_loss = torch.sub(torch.tensor(1), loss(nodes_pred, objs_gt_vecs))[hide_obj_mask].mean()
+          rec_loss = loss(nodes_pred[hide_obj_mask], objs_gt_vecs[hide_obj_mask])
         else:
-          rec_loss = torch.sub(torch.tensor(1), loss(nodes_pred, objs_gt_vecs)).mean()
+          rec_loss = loss(nodes_pred, objs_gt_vecs)
         # Classification
         if args.use_classification_layer:
           cl_loss = classification_loss(classification_scores, objs)  # TODO: Is using classification layer improveds accuracy
