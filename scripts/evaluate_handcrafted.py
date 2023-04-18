@@ -75,7 +75,7 @@ parser.add_argument('--data_image_dir',
         default=os.path.join(VG_DIR, 'images'))
 
 args = parser.parse_args()
-args.dataset = "sgcustom"
+args.dataset = "handcrafted"
 
 def build_model(args, checkpoint):
   model = GATModel(**checkpoint['model_kwargs'])
