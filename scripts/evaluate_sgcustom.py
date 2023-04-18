@@ -97,13 +97,21 @@ def run_model(args, checkpoint, output_dir, loader=None):
   total_correct = 0
   total_objs = 0
 
+  total_profession_correct = 0
+  total_profession = 0
+
   cos_sim = torch.nn.CosineSimilarity(dim=-1)
 
   classes = ['chef', 'doctor', 'engineer', 'farmer', 'firefighter', 'judge', 'mechanic', 'pilot', 'police', 'waiter']
   class_embeddings = [glove[x] for x in classes]
   class_embeddings = [x.cuda() for x in class_embeddings]
 
+  i = 0
+  max_i = 100
   for batch in loader:
+    if i >= max_i:
+      break
+    i += 1
 
     imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in, hide_obj_mask, gt_labels = batch
     batch = [imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in, hide_obj_mask]
@@ -130,8 +138,12 @@ def run_model(args, checkpoint, output_dir, loader=None):
     profession_pred = torch.argmax(torch.tensor(classes_dists)).item()
     print(f"Prediction for hidden node: {classes[profession_pred]} ({profession_pred})")
     print(f"Ground truth: {gt_labels[0]}")
+    if classes[profession_pred] == gt_labels[0]:
+      total_profession_correct += 1
+    total_profession += 1
     print([x.item() for x in classes_dists])
   print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
+  print("Profession accuracy: ", total_profession_correct / total_profession, f" ({total_profession_correct}/{total_profession})")
 
 
 def main(args):
