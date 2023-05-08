@@ -25,7 +25,7 @@ import torch
 
 from imageio import imsave
 
-from simsg.data.visualize import visualize_graph
+from simsg.data.visualize import visualize_graph, explore_graph
 from simsg.model import SIMSGModel
 from simsg.model import glove
 from simsg.model import GATModel
@@ -109,6 +109,7 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
   i = 0
   max_i = 100
+  print("=" * 30, "Image: ", i, "=" * 30)  # before first image is loaded
   for batch in loader:
     if i >= max_i:
       break
@@ -122,8 +123,10 @@ def run_model(args, checkpoint, output_dir, loader=None):
     #   x.cuda() for x in (imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in)
     # ]
 
-    visualize_graph(objs, triples, hide_obj_mask, model.vocab)
-    return
+    explore_graph(objs, triples, hide_obj_mask, model.vocab)
+    if i < max_i:
+      print("=" * 30, "Image: ", i, "=" * 30)  # for the next image
+    continue
     # imgs_in are masked images, imgs_gt are the original images (channels=3)
     model_out = model(objs, triples, boxes_gt=boxes, src_image=imgs_in, hide_obj_mask=hide_obj_mask)
 
@@ -145,6 +148,7 @@ def run_model(args, checkpoint, output_dir, loader=None):
       total_profession_correct += 1
     total_profession += 1
     print([x.item() for x in classes_dists])
+  return
   print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
   print("Profession accuracy: ", total_profession_correct / total_profession, f" ({total_profession_correct}/{total_profession})")
 

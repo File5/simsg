@@ -191,6 +191,7 @@ class CustomSceneGraphDataset(Dataset):
     #return self.get_graph_data(index) # TODO: remove, debug only
     #return os.path.join(self.image_dir, self.image_paths[index])
 
+    print('Image path:', self.image_paths[index])
     img_path = os.path.join(self.image_dir, self.image_paths[index])
     with open(img_path, 'rb') as f:
       with PIL.Image.open(f) as image:
