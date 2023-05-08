@@ -25,7 +25,7 @@ import torch
 
 from imageio import imsave
 
-from simsg.data.visualize import visualize_graph, explore_graph
+from simsg.data.visualize import visualize_graph, explore_graph, find_node, explore_graph2
 from simsg.model import SIMSGModel
 from simsg.model import glove
 from simsg.model import GATModel
@@ -108,7 +108,7 @@ def run_model(args, checkpoint, output_dir, loader=None):
   class_embeddings = [x.cuda() for x in class_embeddings]
 
   i = 0
-  max_i = 100
+  max_i = 1
   print("=" * 30, "Image: ", i, "=" * 30)  # before first image is loaded
   for batch in loader:
     if i >= max_i:
@@ -124,6 +124,8 @@ def run_model(args, checkpoint, output_dir, loader=None):
     # ]
 
     explore_graph(objs, triples, hide_obj_mask, model.vocab)
+    explore_graph2(objs, triples, hide_obj_mask, model.vocab)
+    #visualize_graph(objs, triples, hide_obj_mask, model.vocab)
     if i < max_i:
       print("=" * 30, "Image: ", i, "=" * 30)  # for the next image
     continue

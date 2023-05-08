@@ -89,7 +89,7 @@ def explore_graph2(objs, triples, hide_obj_mask, vocab):
     for i in range(objs.size(0)):
         obj = objs[i].cpu().item()
         obj_name = vocab['object_idx_to_name'][obj]
-        node_labels[str(obj)] = obj_name
+        node_labels[obj] = obj_name
 
     p_names = {}
     edges = []
@@ -101,12 +101,15 @@ def explore_graph2(objs, triples, hide_obj_mask, vocab):
         p_name = vocab['pred_idx_to_name'][p]
         if p_name not in p_names:
             p_names[p] = p_name
-        edges.append(str(s), str(p), str(o))
+        edges.append((node_labels[s], p_names[p], node_labels[o]))
 
     graph = defaultdict(list)
     for s, p, o in edges:
         graph[s].append(o)
         graph[o].append(s)
 
-    print(bfs(graph, 'person', 'helmet'))
+    helmet = find_node(objs, triples, hide_obj_mask, vocab, 'helmet')
+    print(f"helmet: {helmet}")
+    print(bfs(graph, 'person', helmet))
     print(bfs(graph, 'person', 'engineer.n.01'))
+    print(bfs(graph, 'person', 'woman'))
