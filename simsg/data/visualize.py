@@ -83,6 +83,19 @@ def find_node(objs, triples, hide_obj_mask, vocab, node_name):
     return None
 
 
+def find_edges(objs, triples, hide_obj_mask, vocab, target_s, target_o):
+    res = []
+    for i in range(triples.size(0)):
+        triple = triples[i].cpu().numpy()
+        s, p, o = triple
+        s = objs[s].cpu().item()
+        o = objs[o].cpu().item()
+        s_name = vocab['object_idx_to_name'][s]
+        o_name = vocab['object_idx_to_name'][o]
+        if s_name == target_s and o_name == target_o:
+            res.append(vocab['pred_idx_to_name'][p])
+    return res
+
 
 def explore_graph2(objs, triples, hide_obj_mask, vocab):
     node_labels = {}
@@ -113,3 +126,4 @@ def explore_graph2(objs, triples, hide_obj_mask, vocab):
     print(bfs(graph, 'person', helmet))
     print(bfs(graph, 'person', 'engineer.n.01'))
     print(bfs(graph, 'person', 'woman'))
+    print(find_edges(objs, triples, hide_obj_mask, vocab, 'person', 'helmet'))
