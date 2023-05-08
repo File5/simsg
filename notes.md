@@ -36,3 +36,22 @@ Experiments
 +
 Results (15 pages)
 Conclusion
+
+1. Look at article on Message Passing on Graphs
+2. Look at how can we improve MP in our case
+3. Fix evaluation scripts
+
+Explore attention coefficients
+
+Train w/o Neighbor nodes, eval with 2nn
+different propagation techniques
+toy data to test
+ConceptNet
+
+https://www.google.ru/maps/place/printy+Digitaldruck+M%C3%BCnchen/@48.1481958,11.5608768,15.73z/data=!4m10!1m2!2m1!1sprinty!3m6!1s0x479e75e69c96a991:0xea81efdb9b05a61b!8m2!3d48.149688!4d11.566133!15sCgZwcmludHlaCCIGcHJpbnR5kgEKcHJpbnRfc2hvcOABAA!16s%2Fg%2F1tj83vg2
+
+printy
+
+1 to try: For a given scene graph: compare smallest-dist to each of the prof nodes.
+
+Chair meeting with Azade and students - Friday, 5 May, 13:30

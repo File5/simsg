@@ -52,6 +52,7 @@ conda install -c dglteam dgl-cuda11.3
 #conda install --no-deps -c rusty1s  pytorch-geometric
 # more installations
 pip install opencv-python tensorboardx grave addict
+pip install pydot
 # to add current directory to python path run
 echo $PWD > <path_to_env>/lib/python3.7/site-packages/simsg.pth 
 ```

@@ -25,6 +25,7 @@ import torch
 
 from imageio import imsave
 
+from simsg.data.visualize import visualize_graph
 from simsg.model import SIMSGModel
 from simsg.model import glove
 from simsg.model import GATModel
@@ -121,6 +122,8 @@ def run_model(args, checkpoint, output_dir, loader=None):
     #   x.cuda() for x in (imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in)
     # ]
 
+    visualize_graph(objs, triples, hide_obj_mask, model.vocab)
+    return
     # imgs_in are masked images, imgs_gt are the original images (channels=3)
     model_out = model(objs, triples, boxes_gt=boxes, src_image=imgs_in, hide_obj_mask=hide_obj_mask)
 
