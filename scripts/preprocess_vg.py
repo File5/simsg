@@ -90,11 +90,11 @@ def build_wordnet_neighbors_dict(wordnet):
         src_neighbors = result.setdefault(src_synset, [])
         src_neighbors.append((dst_synset, edg_id))
     return result
-wordnet_neighbors = build_wordnet_neighbors_dict(wordnet)
-from simsg.data.conceptnet import conceptnet_neightbors
-
 
 def main(args):
+  wordnet_neighbors = build_wordnet_neighbors_dict(wordnet)
+  from simsg.data.conceptnet import conceptnet_neightbors
+
   print('Loading image info from "%s"' % args.images_json)
   with open(args.images_json, 'r') as f:
     images = json.load(f)

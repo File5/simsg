@@ -32,6 +32,7 @@ from .utils import imagenet_preprocess, Resize
 
 from simsg.data.wordnet import WordNet18
 from scripts.preprocess_vg import build_wordnet_neighbors_dict
+from simsg.data.conceptnet import conceptnet_neightbors
 
 
 class SceneGraphNoPairsDataset(Dataset):
@@ -197,17 +198,14 @@ class SceneGraphNoPairsDataset(Dataset):
 
       for obj_idx, box in zip(source_objs, source_boxes):
         obj_name = self.vocab['object_idx_to_name'][obj_idx]
-        obj_synset = self.vocab['names_to_synsets'].get(obj_name, obj_name)
-        if obj_synset in self.wordnet_neighbors:
-          for neighbor_synset, edge_idx in self.wordnet_neighbors[obj_synset]:
+        neighbors = conceptnet_neightbors.get(obj_name)
+        if neighbors:
+          for neighbor, edge_rel in neighbors:
             try:
-              neighbor_idx = self.vocab['object_name_to_idx'][neighbor_synset]
+              neighbor_idx = self.vocab['object_name_to_idx'][neighbor]
+              edge_idx = self.vocab['pred_name_to_idx'][edge_rel]
             except KeyError:
-              try:
-                neighbor_name = self.vocab['synsets_to_names'][neighbor_synset]
-                neighbor_idx = self.vocab['object_name_to_idx'][neighbor_name]
-              except Exception:
-                continue  # further than n_neighbor
+              continue  # further than n_neighbor
             if neighbor_idx not in seen_objs:
               extend_objs.append(neighbor_idx)
               i = len(map_overlapping_obj)

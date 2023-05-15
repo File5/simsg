@@ -1,3 +1,5 @@
+import json
+import os
 from datasets import load_dataset
 
 dataset = load_dataset("conceptnet5", "conceptnet5")
@@ -43,4 +45,10 @@ def build_conceptnet_neighbors_dict(dataset):
     return neighbors
 
 
-conceptnet_neightbors = build_conceptnet_neighbors_dict(dataset_en["train"])
+if not os.path.exists("datasets/vg/conceptnet_neighbors.json"):
+    conceptnet_neightbors = build_conceptnet_neighbors_dict(dataset_en["train"])
+    with open("datasets/vg/conceptnet_neighbors.json", "w") as f:
+        json.dump(conceptnet_neightbors, f)
+else:
+    with open("datasets/vg/conceptnet_neighbors.json", "r") as f:
+        conceptnet_neightbors = json.load(f)
