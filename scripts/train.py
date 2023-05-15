@@ -147,7 +147,7 @@ def argument_parser():
   parser.add_argument('--restore_from_checkpoint', default=True, type=bool_flag)
 
   # tensorboard options
-  parser.add_argument('--log_dir', default="./experiments/wn2n_hide_50", type=str)
+  parser.add_argument('--log_dir', default="./experiments/cn2n_hide_50_001", type=str)
   parser.add_argument('--max_num_imgs', default=None, type=int)
 
   # SPADE options

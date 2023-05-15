@@ -91,6 +91,7 @@ def build_wordnet_neighbors_dict(wordnet):
         src_neighbors.append((dst_synset, edg_id))
     return result
 wordnet_neighbors = build_wordnet_neighbors_dict(wordnet)
+from simsg.data.conceptnet import conceptnet_neightbors
 
 
 def main(args):
@@ -161,8 +162,8 @@ def main(args):
   nltk.download('wordnet')
   from nltk.corpus import wordnet as wordnet_corpus
 
-  print('Extend vocab with WordNet neighbors')
-  extend_vocab_wordnet(wordnet_corpus, vocab, n_neighbors=args.n_wn_neighbors)
+  print('Extend vocab with ConceptNet neighbors')
+  extend_vocab_conceptnet(conceptnet_neightbors, vocab, n_neighbors=args.n_wn_neighbors)
 
   print('Writing vocab to "%s"' % args.output_vocab_json)
   with open(args.output_vocab_json, 'w') as f:
@@ -246,6 +247,72 @@ def extend_vocab_wordnet(wordnet_corpus, vocab, n_neighbors=2):
 
     vocab['names_to_synsets'] = extension['names_to_synsets']
     vocab['synsets_to_names'] = extension['synsets_to_names']
+    return
+
+def extend_vocab_conceptnet(conceptnet_neightbors, vocab, n_neighbors=2):
+    extension = {'object_names': [], 'pred_names': []}
+    sources = vocab['object_idx_to_name']
+    existing = set(sources)
+    found = []
+    not_found = []
+    without_glove = []
+    def has_glove(s):
+      name = s
+      glove_found = True
+      if name not in glove.stoi:
+        words = re.split(r' |_|-', name.strip('_'))
+        for w in words:
+          if w not in glove.stoi:
+            without_glove.append(s)
+            glove_found = False
+            break  # for w in words
+      return glove_found
+    preds = set()
+    for n in range(n_neighbors):
+        for s in sources:
+            try:
+                neighbors = conceptnet_neightbors.get(s)
+                if neighbors is None:
+                    raise ValueError('name not found')
+            except Exception:
+                not_found.append(s)
+                continue
+            
+            preds.update(map(lambda x: x[1], neighbors))
+            neighbors = list(map(lambda x: x[0], neighbors))
+            neighbors = {x for x in neighbors if x not in existing}
+            neighbors = {x for x in neighbors if has_glove(x)}
+            found.extend(neighbors)
+            existing.update(neighbors)
+        #assert len(found) == len(set(found))
+        extension['object_names'].extend(found)
+        sources = found
+        found = []
+    
+    if len(not_found) > 0:
+        import warnings
+        warnings.warn("Could not find neighbors for the following names (count = {}): {}".format(len(not_found), not_found))
+    if len(without_glove) > 0:
+        import warnings
+        warnings.warn("Could not find GloVe embeddings for the following names (count = {}): {}".format(len(without_glove), without_glove))
+    #assert len(extention) == len(set(extention))
+    pred_names = preds
+    extension['pred_names'].extend(pred_names)
+    
+    start_idx = len(vocab['object_idx_to_name'])
+    vocab['object_name_to_idx'].update(
+        {name: start_idx + idx for idx, name in enumerate(extension['object_names'])}
+    )
+    vocab['object_idx_to_name'].extend(extension['object_names'])
+    
+    start_idx = len(vocab['pred_idx_to_name'])
+    vocab['pred_name_to_idx'].update(
+        {name: start_idx + idx for idx, name in enumerate(extension['pred_names'])}
+    )
+    vocab['pred_idx_to_name'].extend(extension['pred_names'])
+
+    assert all([vocab['object_name_to_idx'][name] == idx for idx, name in enumerate(vocab['object_idx_to_name'])])
+    assert all([vocab['pred_name_to_idx'][name] == idx for idx, name in enumerate(vocab['pred_idx_to_name'])])
     return
 
 def remove_small_images(args, image_id_to_image, splits):

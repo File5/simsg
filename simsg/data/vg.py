@@ -187,7 +187,7 @@ class SceneGraphNoPairsDataset(Dataset):
 
       obj_idx_mapping[obj_idx] = map_overlapping_obj[i]
 
-    # Extend with WordNet objects
+    # Extend with ConceptNet objects
     seen_objs = set(objs)
     extend_triples = []
     source_objs, source_boxes = objs, boxes

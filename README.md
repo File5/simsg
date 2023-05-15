@@ -53,6 +53,7 @@ conda install -c dglteam dgl-cuda11.3
 # more installations
 pip install opencv-python tensorboardx grave addict
 pip install pydot
+pip install datasets
 # to add current directory to python path run
 echo $PWD > <path_to_env>/lib/python3.7/site-packages/simsg.pth 
 ```
