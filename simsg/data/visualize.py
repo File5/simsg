@@ -127,3 +127,37 @@ def explore_graph2(objs, triples, hide_obj_mask, vocab):
     print(bfs(graph, 'person', 'engineer.n.01'))
     print(bfs(graph, 'person', 'woman'))
     print(find_edges(objs, triples, hide_obj_mask, vocab, 'person', 'helmet'))
+
+
+def explore_graph3(objs, triples, hide_obj_mask, vocab, wordnet_neighbors):
+    classes = ['chef', 'doctor', 'engineer', 'farmer', 'firefighter', 'judge', 'mechanic', 'pilot', 'police', 'waiter']
+    interested_nodes = classes
+    found = {}
+
+    seen_synsets = set()
+    source_objs = [vocab['object_idx_to_name'][obj_idx] for obj_idx in objs]
+    source_objs = list(map(lambda x: vocab['names_to_synsets'].get(x, x + '.n.01'), source_objs))
+    # Extend WordNet neighbors
+    for n in range(10):
+      extend_objs = []
+
+      for obj_synset in source_objs:
+        if obj_synset not in seen_synsets:
+            seen_synsets.add(obj_synset)
+        else:
+            continue  # objects loop
+
+        if obj_synset in wordnet_neighbors:
+          for neighbor_synset, edge_idx in wordnet_neighbors[obj_synset]:
+            if neighbor_synset not in seen_synsets:
+              extend_objs.append(neighbor_synset)
+
+            neighbor_name = vocab['synsets_to_names'].get(neighbor_synset, neighbor_synset.split('.', 1)[0])
+            if neighbor_name in interested_nodes:
+                if neighbor_name not in found:
+                    found[neighbor_name] = n + 1
+
+      if len(found) == len(interested_nodes):
+        break  # neighbors loop
+      source_objs = extend_objs
+    return found

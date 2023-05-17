@@ -225,7 +225,7 @@ class CustomSceneGraphDataset(Dataset):
     seen_objs = set(objs)
     extend_triples = []
     source_objs, source_boxes = objs, boxes
-    for n in range(self.n_neighbors):
+    for n in []:
       extend_objs = []
       extend_boxes = []
 

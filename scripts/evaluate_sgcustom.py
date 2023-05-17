@@ -25,7 +25,7 @@ import torch
 
 from imageio import imsave
 
-from simsg.data.visualize import visualize_graph, explore_graph, find_node, explore_graph2
+from simsg.data.visualize import visualize_graph, explore_graph, find_node, explore_graph2, explore_graph3
 from simsg.model import SIMSGModel
 from simsg.model import glove
 from simsg.model import GATModel
@@ -36,6 +36,8 @@ from simsg.data.handcrafted import add_person_is_hidden
 
 import cv2
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
 from simsg.loader_utils import build_eval_loader
 from scripts.eval_utils import makedir, query_image_by_semantic_id, save_graph_json, \
@@ -107,8 +109,10 @@ def run_model(args, checkpoint, output_dir, loader=None):
   class_embeddings = [glove[x] for x in classes]
   class_embeddings = [x.cuda() for x in class_embeddings]
 
+  results = []
+
   i = 0
-  max_i = 1
+  max_i = 10 ** 6
   print("=" * 30, "Image: ", i, "=" * 30)  # before first image is loaded
   for batch in loader:
     if i >= max_i:
@@ -123,9 +127,13 @@ def run_model(args, checkpoint, output_dir, loader=None):
     #   x.cuda() for x in (imgs_gt, objs, boxes, triples, obj_to_img, triple_to_img, imgs_in)
     # ]
 
-    explore_graph(objs, triples, hide_obj_mask, model.vocab)
-    explore_graph2(objs, triples, hide_obj_mask, model.vocab)
+    #explore_graph(objs, triples, hide_obj_mask, model.vocab)
+    #explore_graph2(objs, triples, hide_obj_mask, model.vocab)
     #visualize_graph(objs, triples, hide_obj_mask, model.vocab)
+
+    found = explore_graph3(objs, triples, hide_obj_mask, model.vocab, loader.dataset.wordnet_neighbors)
+    results.append(found)
+
     if i < max_i:
       print("=" * 30, "Image: ", i, "=" * 30)  # for the next image
     continue
@@ -150,6 +158,11 @@ def run_model(args, checkpoint, output_dir, loader=None):
       total_profession_correct += 1
     total_profession += 1
     print([x.item() for x in classes_dists])
+  plt.figure(figsize=(10, 7), dpi=300)
+  df = pd.DataFrame(results)
+  df.hist()
+  plt.show()
+
   return
   print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
   print("Profession accuracy: ", total_profession_correct / total_profession, f" ({total_profession_correct}/{total_profession})")
