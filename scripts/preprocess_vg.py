@@ -64,7 +64,7 @@ parser.add_argument('--min_relationship_instances', default=500, type=int)
 parser.add_argument('--min_relationships_per_image', default=1, type=int)
 parser.add_argument('--max_relationships_per_image', default=30, type=int)
 
-parser.add_argument('--n_wn_neighbors', default=2, type=int)
+parser.add_argument('--n_wn_neighbors', default=1, type=int)
 
 # Output
 parser.add_argument('--output_vocab_json',
@@ -92,7 +92,6 @@ def build_wordnet_neighbors_dict(wordnet):
     return result
 
 def main(args):
-  wordnet_neighbors = build_wordnet_neighbors_dict(wordnet)
   from simsg.data.conceptnet import conceptnet_neightbors
 
   print('Loading image info from "%s"' % args.images_json)
@@ -170,6 +169,7 @@ def main(args):
     json.dump(vocab, f)
 
 def extend_vocab_wordnet(wordnet_corpus, vocab, n_neighbors=2):
+    wordnet_neighbors = build_wordnet_neighbors_dict(wordnet)
     DEFAULT_SUFFIX = '.n.01'
     extension = {'object_names': [], 'pred_names': [], 'names_to_synsets': {}, 'synsets_to_names': {}}
     sources = [w + DEFAULT_SUFFIX for w in vocab['object_idx_to_name']]
