@@ -55,3 +55,11 @@ printy
 1 to try: For a given scene graph: compare smallest-dist to each of the prof nodes.
 
 Chair meeting with Azade and students - Friday, 5 May, 13:30
+
+For the IdenProf:
+for each image:
+calculate the dist to all the classes
+
+---
+calculate avg distance (confusion matrix)
+gt class \ classes
