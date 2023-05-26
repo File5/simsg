@@ -38,6 +38,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from simsg.loader_utils import build_eval_loader
 from scripts.eval_utils import makedir, query_image_by_semantic_id, save_graph_json, \
@@ -132,6 +133,7 @@ def run_model(args, checkpoint, output_dir, loader=None):
     #visualize_graph(objs, triples, hide_obj_mask, model.vocab)
 
     found = explore_graph3(objs, triples, hide_obj_mask, model.vocab, loader.dataset.wordnet_neighbors)
+    found['gt'] = gt_labels[0]
     results.append(found)
 
     if i < max_i:
@@ -158,9 +160,13 @@ def run_model(args, checkpoint, output_dir, loader=None):
       total_profession_correct += 1
     total_profession += 1
     print([x.item() for x in classes_dists])
-  plt.figure(figsize=(10, 7), dpi=300)
+  #plt.figure(figsize=(10, 7), dpi=300)
   df = pd.DataFrame(results)
-  df.hist()
+  #df.hist()
+  cf_matrix = df.groupby(['gt']).mean()
+  f, ax = plt.subplots(figsize=(9, 9))
+  sns.heatmap(cf_matrix, annot=True, ax=ax)
+  plt.yticks(rotation=0)
   plt.show()
 
   return
