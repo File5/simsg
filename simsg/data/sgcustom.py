@@ -52,9 +52,33 @@ class CustomSceneGraphDataset(Dataset):
     self.image_dir = image_dir
     self.image_size = image_size
 
-    with open(os.path.join(dataset_path, 'custom_data_info.json'), 'r') as f:
-      self.data_info = json.load(f)
-    self.idx_to_files = self.data_info['idx_to_files']
+    self.idx_to_files = []
+    self.predictions = {}
+    for file_name in os.listdir(os.path.join(dataset_path, 'sgg')):
+      if not file_name.endswith('_label.json'):
+        continue
+
+      base_name = file_name[:-len('_label.json')]
+      self.idx_to_files.append(base_name + '.jpg')
+
+      with open(os.path.join(dataset_path, 'sgg', base_name + '_label.json'), 'r') as f:
+        data_info = json.load(f)
+        index = len(self.idx_to_files) - 1
+        new_entry = {'bbox': [], 'bbox_labels': [], 'triples': []}
+        self.predictions[str(index)] = new_entry
+
+        for obj_data_info in data_info['mask']:
+          if obj_data_info['label'] == 'background':
+            continue
+
+          new_entry['bbox'].append(obj_data_info['box'])
+          new_entry['bbox_labels'].append(obj_data_info['label'])
+
+      with open(os.path.join(dataset_path, 'sgg', base_name + '.json'), 'r') as f:
+        pred_info = json.load(f)
+        for relation in pred_info['relations']:
+          s, p, o = relation['s'], relation['p'], relation['o']
+          new_entry['triples'].append([s, p, o])
 
     self.replace_img_filepath = '/root/checkpoints/custom_images/'
     self.image_paths = []
@@ -62,9 +86,6 @@ class CustomSceneGraphDataset(Dataset):
         self.image_paths.append(path.replace(self.replace_img_filepath, ''))
     #self.idx_to_classes = self.data_info['ind_to_classes']
     #self.idx_to_predicates = self.data_info['ind_to_predicates']
-
-    with open(os.path.join(dataset_path, 'custom_prediction.json'), 'r') as f:
-      self.predictions = json.load(f)
 
     self.use_gt_file = False
     if self.use_gt_file:
@@ -115,37 +136,19 @@ class CustomSceneGraphDataset(Dataset):
     box_topk = 30
     rel_topk = 20
 
-    custom_data_info = self.data_info
-    ind_to_classes = custom_data_info['ind_to_classes']
-    ind_to_predicates = custom_data_info['ind_to_predicates']
     custom_prediction = self.predictions
 
     image_idx = index
 
-    image_path = custom_data_info['idx_to_files'][image_idx]
     boxes = custom_prediction[str(image_idx)]['bbox'][:box_topk]
     box_labels = custom_prediction[str(image_idx)]['bbox_labels'][:box_topk]
-    box_scores = custom_prediction[str(image_idx)]['bbox_scores'][:box_topk]
-    all_rel_labels = custom_prediction[str(image_idx)]['rel_labels']
-    all_rel_scores = custom_prediction[str(image_idx)]['rel_scores']
-    all_rel_pairs = custom_prediction[str(image_idx)]['rel_pairs']
+    triples_info = custom_prediction[str(image_idx)]['triples']
 
-    for i in range(len(box_labels)):
-        box_labels[i] = ind_to_classes[box_labels[i]]
-
-    rel_labels = []
-    rel_scores = []
     triples = []
     obj_names = box_labels
-    for i in range(len(all_rel_pairs)):
-        if all_rel_pairs[i][0] < box_topk and all_rel_pairs[i][1] < box_topk:
-            rel_scores.append(all_rel_scores[i])
-            label = str(all_rel_pairs[i][0]) + '_' + box_labels[all_rel_pairs[i][0]] + ' => ' + ind_to_predicates[all_rel_labels[i]] + ' => ' + str(all_rel_pairs[i][1]) + '_' + box_labels[all_rel_pairs[i][1]]
-            rel_labels.append(label)
-            triples.append([box_labels[all_rel_pairs[i][0]], ind_to_predicates[all_rel_labels[i]], box_labels[all_rel_pairs[i][1]]])
+    for s, p, o in triples_info:
+      triples.append([s, p, o])
 
-    rel_labels = rel_labels[:rel_topk]
-    rel_scores = rel_scores[:rel_topk]
     return triples, obj_names, boxes
 
   def get_object_idx(self, obj_name):

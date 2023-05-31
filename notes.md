@@ -63,3 +63,6 @@ calculate the dist to all the classes
 ---
 calculate avg distance (confusion matrix)
 gt class \ classes
+
+Generate Scene Graphs with https://github.com/JackWhite-rwx/SceneGraphGenZeroShotWithGSAM
+and compare the confusion matrix
