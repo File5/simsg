@@ -66,3 +66,18 @@ gt class \ classes
 
 Generate Scene Graphs with https://github.com/JackWhite-rwx/SceneGraphGenZeroShotWithGSAM
 and compare the confusion matrix
+
+
+Results
+
+Datasets used
+Hyperparameters, NN architectures
+
+1. Supervised with IdenProf
+2. CLIP results
+
+3. Scene Generation results with pretrained on VG, with zero-shot (SceneGraphGenZeroShotWithGSAM)
+
+4. Iterative results (adding visual features, masking)
+
+5. Heatmaps, conf matrix
