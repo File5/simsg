@@ -132,6 +132,11 @@ def explore_graph2(objs, triples, hide_obj_mask, vocab):
 def explore_graph3(objs, triples, hide_obj_mask, vocab, wordnet_neighbors):
     classes = ['chef', 'doctor', 'engineer', 'farmer', 'firefighter', 'judge', 'mechanic', 'pilot', 'police', 'waiter']
     interested_nodes = classes
+    return wn_extention_dists(objs, triples, hide_obj_mask, vocab, wordnet_neighbors, to=interested_nodes)
+
+
+def wn_extention_dists(objs, triples, hide_obj_mask, vocab, wordnet_neighbors, to):
+    synset_to_name = lambda s: vocab['synsets_to_names'].get(s, s.split('.', 1)[0])
     found = {}
 
     seen_synsets = set()
@@ -152,12 +157,12 @@ def explore_graph3(objs, triples, hide_obj_mask, vocab, wordnet_neighbors):
             if neighbor_synset not in seen_synsets:
               extend_objs.append(neighbor_synset)
 
-            neighbor_name = vocab['synsets_to_names'].get(neighbor_synset, neighbor_synset.split('.', 1)[0])
-            if neighbor_name in interested_nodes:
+            neighbor_name = synset_to_name(neighbor_synset)
+            if neighbor_name in to:
                 if neighbor_name not in found:
                     found[neighbor_name] = n + 1
 
-      if len(found) == len(interested_nodes):
+      if len(found) == len(to):
         break  # neighbors loop
       source_objs = extend_objs
     return found

@@ -25,7 +25,7 @@ import torch
 
 from imageio import imsave
 
-from simsg.data.visualize import visualize_graph, explore_graph, find_node, explore_graph2, explore_graph3
+from simsg.data.visualize import visualize_graph, explore_graph, find_node, explore_graph2, explore_graph3, wn_extention_dists
 from simsg.model import SIMSGModel
 from simsg.model import glove
 from simsg.model import GATModel
@@ -112,6 +112,13 @@ def run_model(args, checkpoint, output_dir, loader=None):
 
   results = []
 
+  use_cached_results = os.path.exists('results.csv')
+  if use_cached_results:
+    df = pd.read_csv('results.csv')
+    df = df.drop(columns=['Unnamed: 0'])
+    print("Skip dataset loading, using cached results")
+    loader = []
+
   i = 0
   max_i = 10 ** 6
   print("=" * 30, "Image: ", i, "=" * 30)  # before first image is loaded
@@ -161,16 +168,26 @@ def run_model(args, checkpoint, output_dir, loader=None):
     total_profession += 1
     print([x.item() for x in classes_dists])
   #plt.figure(figsize=(10, 7), dpi=300)
-  df = pd.DataFrame(results)
-  #df.hist()
-  cf_matrix = df.groupby(['gt']).mean()
-  f, ax = plt.subplots(figsize=(9, 9))
-  sns.heatmap(cf_matrix, annot=True, ax=ax)
-  plt.yticks(rotation=0)
-  plt.show()
 
-  return
-  print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
+  if not use_cached_results:
+    df = pd.DataFrame(results)
+    df.to_csv('results.csv')
+  #df.hist()
+
+  # cf_matrix = df.groupby(['gt']).mean()
+  # f, ax = plt.subplots(figsize=(9, 9))
+  # sns.heatmap(cf_matrix, annot=True, ax=ax)
+  # plt.yticks(rotation=0)
+  # plt.show()
+
+  classes_present = [x for x in classes if x in df.columns]
+  preds = np.argmax(df[classes_present].to_numpy(), axis=-1)
+  class_to_idx = {c: i for i, c in enumerate(classes_present)}
+  gt = df['gt'].map(class_to_idx).to_numpy()
+  total_profession_correct = np.sum(preds == gt)
+  total_profession = len(gt)
+
+  #print("Accuracy: ", total_correct / total_objs, f" ({total_correct}/{total_objs})")
   print("Profession accuracy: ", total_profession_correct / total_profession, f" ({total_profession_correct}/{total_profession})")
 
 
