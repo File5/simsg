@@ -191,7 +191,8 @@ class CustomSceneGraphDataset(Dataset):
     #return self.get_graph_data(index) # TODO: remove, debug only
     #return os.path.join(self.image_dir, self.image_paths[index])
 
-    print('Image path:', self.image_paths[index])
+    image_path = self.image_paths[index]
+    print('Image path:', image_path)
     img_path = os.path.join(self.image_dir, self.image_paths[index])
     with open(img_path, 'rb') as f:
       with PIL.Image.open(f) as image:
@@ -293,7 +294,7 @@ class CustomSceneGraphDataset(Dataset):
     else:
       img_basename = os.path.split(os.path.splitext(self.image_paths[index])[0])[1]
       gt_label = img_basename.split('-')[0]
-    return image, objs, boxes, triples, hide_obj_mask, gt_label
+    return image, objs, boxes, triples, hide_obj_mask, gt_label, image_path
 
 
 def find_in_tensor(tensor, value):
@@ -352,7 +353,9 @@ def collate_fn_nopairs_imgs(batch):
 
   all_gt_labels = []
 
-  for i, (img, objs, boxes, triples, hide_obj_mask, gt_label) in enumerate(batch):
+  all_image_paths = []
+
+  for i, (img, objs, boxes, triples, hide_obj_mask, gt_label, image_path) in enumerate(batch):
 
     all_imgs.append(img[None])
     num_objs, num_triples = objs.size(0), triples.size(0)
@@ -382,6 +385,8 @@ def collate_fn_nopairs_imgs(batch):
 
     all_gt_labels.append(gt_label)
 
+    all_image_paths.append(image_path)
+
   all_imgs_masked = torch.cat(all_imgs_masked)
 
   all_imgs = torch.cat(all_imgs)
@@ -394,7 +399,7 @@ def collate_fn_nopairs_imgs(batch):
 
   return all_imgs, all_objs, all_boxes, all_triples, \
          all_obj_to_img, all_triple_to_img, all_imgs_masked, \
-         all_hide_obj_masks, all_gt_labels
+         all_hide_obj_masks, all_gt_labels, all_image_paths
 
 
 from simsg.model import get_left_right_top_bottom

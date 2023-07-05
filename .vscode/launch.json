@@ -76,5 +76,17 @@
             },
             "justMyCode": false
         },
+        {
+            "name": "export_sgcustom",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/export_sgcustom.py",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:512"
+            },
+            "justMyCode": false
+        },
     ]
 }
